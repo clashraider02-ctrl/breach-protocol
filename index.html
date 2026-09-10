@@ -2213,7 +2213,50 @@ function netSend(msg){
   }
 }
 
-function hostGame(mode){
+// STUN alone only gets two peers talking directly when both sides' NAT
+// allows it - fine for most home routers, but a "symmetric" NAT (common on
+// stricter home/mobile/corporate networks) blocks that entirely, and the
+// connection just hangs with no error. TURN is the fix: a relay server
+// both sides can always reach, so traffic bounces through it instead of
+// going direct. Unlike STUN, relaying real traffic costs real bandwidth,
+// so free TURN providers gate it behind a free account instead of a
+// public shared credential - fill in METERED_APP_NAME/METERED_API_KEY
+// (free at https://dashboard.metered.ca/signup, then Dashboard -> your
+// app -> API key) to add that fallback. Left blank, this runs STUN-only:
+// it'll work for most people, but two players who both land on a strict/
+// symmetric NAT still won't connect.
+const METERED_APP_NAME = '';
+const METERED_API_KEY = '';
+const BASE_ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.relay.metered.ca:80' },
+];
+async function fetchIceConfig(){
+  if(!METERED_APP_NAME || !METERED_API_KEY) return { iceServers: BASE_ICE_SERVERS };
+  try{
+    const res = await fetch(`https://${METERED_APP_NAME}.metered.live/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`);
+    const turnServers = await res.json();
+    return { iceServers: BASE_ICE_SERVERS.concat(turnServers) };
+  }catch(e){
+    return { iceServers: BASE_ICE_SERVERS }; // TURN fetch failed - still try STUN-only rather than not connecting at all
+  }
+}
+
+// if the connection hasn't opened within this long, something's actually
+// wrong (not just slow) - tell the player instead of leaving them staring
+// at "Connecting..." forever with no idea whether to keep waiting
+const NET_CONNECT_TIMEOUT_MS = 20000;
+function armConnectTimeout(){
+  clearTimeout(net.connectTimeoutId);
+  net.connectTimeoutId = setTimeout(()=>{
+    if(!net.connected){
+      setNetStatus('Could not connect - one of you may be on a restrictive network. Try again, or ask them to try hosting instead.', true);
+    }
+  }, NET_CONNECT_TIMEOUT_MS);
+}
+
+async function hostGame(mode){
   net.mode = mode; net.role = 'host';
   const code = generateRoomCode();
   document.getElementById('roomCodeDisplay').textContent = code;
@@ -2221,11 +2264,13 @@ function hostGame(mode){
   document.getElementById('joinPanel').classList.add('hidden');
   document.getElementById('hostWaitPanel').classList.remove('hidden');
   setNetStatus('Connecting to signaling server...');
-  net.peer = new Peer('bp-'+code, { debug:0 });
-  net.peer.on('open', ()=> setNetStatus('Share this code - waiting for player to join...'));
+  const config = await fetchIceConfig();
+  net.peer = new Peer('bp-'+code, { debug:0, config });
+  net.peer.on('open', ()=>{ setNetStatus('Share this code - waiting for player to join...'); armConnectTimeout(); });
   net.peer.on('connection', conn=>{
     net.conn = conn;
     wireConnection(()=>{
+      clearTimeout(net.connectTimeoutId);
       netSend({t:'mode', mode:net.mode});
       document.getElementById('connectScreen').classList.add('hidden');
       document.getElementById('mapSelectScreen').classList.remove('hidden');
@@ -2235,14 +2280,19 @@ function hostGame(mode){
   net.peer.on('error', err=> setNetStatus('Host error: '+err.type, true));
 }
 
-function joinGame(code){
+async function joinGame(code){
   net.role = 'guest';
   setNetStatus('Connecting...');
-  net.peer = new Peer(undefined, { debug:0 });
+  const config = await fetchIceConfig();
+  net.peer = new Peer(undefined, { debug:0, config });
   net.peer.on('open', ()=>{
     const conn = net.peer.connect('bp-'+code.trim().toUpperCase(), { reliable:true });
     net.conn = conn;
-    wireConnection(()=> setNetStatus('Connected - waiting for host to choose a mode/map...'));
+    armConnectTimeout();
+    wireConnection(()=>{
+      clearTimeout(net.connectTimeoutId);
+      setNetStatus('Connected - waiting for host to choose a mode/map...');
+    });
   });
   net.peer.on('error', err=> setNetStatus('Could not connect: '+err.type, true));
 }
@@ -2573,6 +2623,7 @@ document.getElementById('joinCodeInput').addEventListener('keydown', e=>{
 });
 [['backBtn','joinPanel'],['backBtn2','hostWaitPanel']].forEach(([btnId,panelId])=>{
   document.getElementById(btnId).addEventListener('click', ()=>{
+    clearTimeout(net.connectTimeoutId);
     if(net.peer){ try{ net.peer.destroy(); }catch(e){} net.peer=null; net.conn=null; net.connected=false; }
     net.role=null; net.mode='solo';
     document.getElementById(panelId).classList.add('hidden');
