@@ -2,7 +2,7 @@
 
 A browser-based tactical FPS built with Three.js — single HTML file, no build step.
 
-Play it live: (link added after first deploy)
+Play it live: https://clashraider02-ctrl.github.io/breach-protocol/
 
 ## Features
 - 5 maps with real verticality (stairs, platforms, tunnels) and varied textures
