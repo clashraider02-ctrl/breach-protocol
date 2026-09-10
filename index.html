@@ -1733,19 +1733,41 @@ function updateAmmoHUD(){
 // reserve of that weapon's own ammo type). Purely a floor item, no slot
 // inventory - one weapon held at a time, same as the AI.
 // ---------------------------------------------------------------------------
+// co-op is host-authoritative for pickups same as everything else: only the
+// host's damageEnemy() ever calls spawnPickup() organically (the guest never
+// runs damageEnemy locally, see the hitEnemy report above), so a pickup only
+// ever existed on the host's own client - the guest's `pickups` array stayed
+// permanently empty and there was nothing for them to walk into. Every
+// pickup now gets a stable id, the host broadcasts its spawn so the guest
+// builds a matching local copy, and whichever side actually collects it
+// (each client still checks distance against its OWN local player, exactly
+// as before - that part was never broken) tells the other side to remove
+// its copy too.
 const pickups = [];
 const pickupGeo = new THREE.BoxGeometry(0.32, 0.1, 0.12);
-function spawnPickup(x, z, weaponType){
+let pickupIdCounter = 0;
+function spawnPickup(x, z, weaponType, id, fromNet){
+  if(id==null) id = 'pk'+(pickupIdCounter++);
   const mat = new THREE.MeshStandardMaterial({ color: WEAPONS[weaponType].color, roughness:0.4, metalness:0.5, emissive:0x1a1206, emissiveIntensity:0.4 });
   const mesh = new THREE.Mesh(pickupGeo, mat);
   mesh.position.set(x, 0.42, z);
   mesh.rotation.y = Math.random()*Math.PI;
   mesh.castShadow = true;
   scene.add(mesh);
-  pickups.push({ mesh, weaponType, bobPhase: Math.random()*10 });
+  pickups.push({ id, mesh, weaponType, bobPhase: Math.random()*10 });
+  if(!fromNet && net.role==='host' && net.mode==='coop') netSend({ t:'pickupSpawn', id, x, z, weaponType });
+}
+function disposePickup(p){
+  scene.remove(p.mesh);
+  p.mesh.geometry===pickupGeo || p.mesh.geometry.dispose();
+  p.mesh.material.dispose();
+}
+function removePickupById(id){
+  const i = pickups.findIndex(p=>p.id===id);
+  if(i>=0){ disposePickup(pickups[i]); pickups.splice(i,1); }
 }
 function clearPickups(){
-  pickups.forEach(p=>{ scene.remove(p.mesh); p.mesh.geometry===pickupGeo || p.mesh.geometry.dispose(); p.mesh.material.dispose(); });
+  pickups.forEach(disposePickup);
   pickups.length = 0;
 }
 const PICKUP_RADIUS = 1.1;
@@ -1759,9 +1781,8 @@ function updatePickups(dt){
     if(Math.hypot(dx,dz) < PICKUP_RADIUS){
       equipWeapon(p.weaponType);
       playReloadSound();
-      scene.remove(p.mesh);
-      p.mesh.geometry===pickupGeo || p.mesh.geometry.dispose();
-      p.mesh.material.dispose();
+      if(net.mode==='coop' && net.connected) netSend({ t:'pickupTaken', id:p.id });
+      disposePickup(p);
       pickups.splice(i,1);
     }
   }
@@ -2418,6 +2439,10 @@ function onNetMessage(msg){
       if(net.role==='host'){ const en = enemies[msg.i]; if(en) damageEnemy(en, msg.dmg); }
       break;
     case 'guestHealth': netApplyGuestHealth(msg.health); break; // host -> guest, co-op
+    case 'pickupSpawn':                                         // host -> guest, co-op
+      if(net.role==='guest') spawnPickup(msg.x, msg.z, msg.weaponType, msg.id, true);
+      break;
+    case 'pickupTaken': removePickupById(msg.id); break;        // co-op, either direction - whoever didn't grab it locally removes their copy
     case 'squadDown': netApplySquadDown(); break;               // host -> guest, co-op
     case 'squadCleared': netApplySquadCleared(); break;         // host -> guest, co-op
     case 'hitPlayer': netApplyPvpHit(msg.dmg); break;           // pvp, either direction
@@ -2509,6 +2534,7 @@ function netApplyRoundInit(msg){
   clearNetPuppets();
   enemies.forEach(en=> enemyGroup.remove(en.group));
   enemies.length = 0;
+  clearPickups(); // the host clears its own on every spawnRound() - do the same here so a leftover pickup from last round doesn't linger on the guest's screen
   msg.enemyWeapons.forEach((weaponType, i)=>{
     const t = activeMap.enemyTemplates[i];
     const puppet = buildEnemy(t, weaponType);
