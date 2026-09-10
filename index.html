@@ -252,6 +252,10 @@
       <span class="mapCardName">OASIS</span>
       <span class="mapCardDesc">Sun-bleached ruins traced from a real reference model. Wide courtyard, tapered north end.</span>
     </button>
+    <button class="mapCard" data-map="5" style="--swatch:#6b6a30">
+      <span class="mapCardName">NUKE</span>
+      <span class="mapCardDesc">Twin houses split the map down the middle. Flank left, flank right, or push the alley between them.</span>
+    </button>
   </div>
   <p class="mapSelectHint">Rotates through the remaining maps every 5 rounds</p>
 </div>
@@ -1032,6 +1036,11 @@ const MAPS = [
       // wall via boxIsFree at each point)
       { pos:[-15,9], patrol:[[-15,9],[-19,9],[-19,3],[-15,3]] },
     ],
+    // no house here - this map's interior is dense enough (partitions,
+    // mezzanine, 5 enemies' worth of crates/patrol routes) that every open
+    // pocket left over turned out to seal off part of the map once an 8x6
+    // structure went into it, confirmed with a full flood-fill from spawn
+    // rather than just checking the new structure's own footprint was clear
   },
   {
     // interior mirrored left-right from SANDSTONE (same proven layout,
@@ -1070,6 +1079,9 @@ const MAPS = [
       // mirrors SANDSTONE's relocation of this same enemy - see the comment there
       { pos:[15,9],   patrol:[[15,9],[19,9],[19,3],[15,3]] },
     ],
+    // full flood-fill validated: every enemy pos/patrol point, every crate,
+    // spawn2, and the house door itself all still reachable from spawn
+    houses: [ { x:-4.3, z:3.7, w:8, d:6, door:'s' } ],
   },
   {
     // interior mirrored north-south from SANDSTONE, repainted warm/sandy
@@ -1098,6 +1110,8 @@ const MAPS = [
       { pos:[16,-4], patrol:[[16,-4],[10,-10],[16,-10]] },
       { pos:[0,-10], patrol:[[0,-10],[-8,-13],[8,-13]] },
     ],
+    // full flood-fill validated (see FACILITY)
+    houses: [ { x:-6.3, z:7.7, w:8, d:6, door:'s' } ],
     // NE loft over the open field east of the [12,-8] wall - footprint
     // (stairs x[9.5,14.5] z[3.5,6.5], platform x[14.5,21.5] z[1,9])
     // checked clear of every crate/patrol point below.
@@ -1174,6 +1188,9 @@ const MAPS = [
       { pos:[24,-32],  patrol:[[24,-32],[30,-32],[30,-24],[18,-24]] },    // A site
       { pos:[-24,-32], patrol:[[-24,-32],[-30,-32],[-30,-26],[-18,-26]] }, // B site
     ],
+    // full flood-fill validated (see FACILITY) - moved off the original spot
+    // near the "Back Plat" crate, which the door opened straight into
+    houses: [ { x:-26.3, z:-1.3, w:8, d:6, door:'s' } ],
     // Tunnels gets its own lower, covered roof (distinct from the open sky
     // elsewhere) plus support ribs, so it actually reads as a tunnel
     // instead of just another walled lane - see buildDustTunnelRoof(). Now
@@ -1270,6 +1287,11 @@ const MAPS = [
       { pos:[-8,-22],  patrol:[[-8,-22],[-8,-31],[-18,-28]] },
       { pos:[-25,24],  patrol:[[-25,24],[-24,29],[-20,28]] },
     ],
+    // full flood-fill validated (see FACILITY) - the original spot was in an
+    // isolated pocket (clear of walls itself, but not actually connected to
+    // the rest of the map), caught by tracing reachability from spawn rather
+    // than just checking the new structure's own footprint
+    houses: [ { x:-27, z:-34, w:8, d:6, door:'s' } ],
     tunnelRoof: { xRange:[-21,-3], zRange:[-29,3], y:3.1 },
     doorArches: [ [-26,31,14] ],
     // a raised lookout on the open east side, reached by its own stairway -
@@ -1282,6 +1304,53 @@ const MAPS = [
       addBlock(27, 3.0+1.0, 1.25, 7.5, 2.0, 0.4, brickMat);
       addBlock(30.75, 3.0+1.0, -3, 0.4, 2.0, 8.5, brickMat);
       addBlock(25, 3.0+0.5, -5, 1.1, 1.0, 1.1, brickMat);
+    },
+  },
+  {
+    // twin houses dominate the middle of the map - a chokepoint alley
+    // between them splits the whole layout into a west and east half, each
+    // mirroring the other. Full layout (spawn/spawn2, every enemy pos and
+    // patrol point, every crate, both house doorways, and the central
+    // mezzanine) verified reachable from spawn by simulating an actual walk
+    // there through the real movement/collision code, not just checking
+    // each point's own spot was clear of walls.
+    name: 'NUKE',
+    spawn: [0, 12],
+    spawn2: [-13, -14],
+    ceilHeight: 7.5,
+    tint: { wall:0x5a5f45, wall2:0x4a4e38, floor:0x36382a, crate:0x6b6a30, ceil:0x1c1e16,
+      indoorWall:0x726b3e, indoorFloor:0x494a32 },
+    // flank walls only cover the south half (z[-8,2]) - the whole north
+    // area (where spawn and the two flank enemies' patrol routes live)
+    // stays open, rather than a full-length wall that would need a
+    // precisely-placed gap to avoid sealing part of the map off
+    partitions: [
+      [-15, -3, 0.5, 10],  // west flank wall
+      [15, -3, 0.5, 10],   // east flank wall (mirrored)
+      [-11, -9, 8, 0.5],   // south-west cover nib
+      [11, -9, 8, 0.5],    // south-east cover nib (mirrored)
+    ],
+    crates: [[-17,10],[17,10],[-9,-14],[9,-14],[-4,7],[4,7]],
+    enemyTemplates: [
+      { pos:[-17,-2], patrol:[[-17,-2],[-17,-8],[-13,-8],[-13,-2]] },
+      { pos:[17,-2],  patrol:[[17,-2],[17,-8],[13,-8],[13,-2]] },
+      { pos:[6,-11],  patrol:[[6,-11],[6,-16],[9,-16],[9,-11]] },
+      { pos:[-17,9],  patrol:[[-17,9],[-19,12],[-13,12]] },
+      { pos:[17,9],   patrol:[[17,9],[19,12],[13,12]] },
+    ],
+    // the two houses "in the middle" - doors face each other across a
+    // central alley, so approaching from either flank funnels you through
+    // one house or the other, or straight up the middle between them
+    houses: [
+      { x:-7, z:0, w:8, d:6, door:'e' },
+      { x:7,  z:0, w:8, d:6, door:'w' },
+    ],
+    // a small central mezzanine behind the houses, overlooking the south
+    // end of the map - footprint (stairs x[-2,2] z[-14.5,-10.5], platform
+    // x[-3,3] z[-17.5,-13.5]) checked clear of every crate/patrol point.
+    buildVerticality({ plankMat }){
+      addStairs(0, -12.5, 4, 4, 'z', 0, 2.4, plankMat, 6);
+      addPlatform(0, -15.5, 6, 4, 2.4, plankMat);
     },
   },
 ];
@@ -1310,6 +1379,7 @@ function buildMap(map){
 
   if(map.tunnelRoof) buildDustTunnelRoof(map.tunnelRoof);
   if(map.doorArches) map.doorArches.forEach(([x,z,w])=> buildArch(x,z,w));
+  if(map.houses) map.houses.forEach(hs=> buildHouse(hs.x, hs.z, hs.w, hs.d, brickMat, trimMat, hs.door));
   // the actual verticality/depth pass - raised rooms, stairs, tunnels,
   // angled cover - lives per-map right next to its layout data below
   if(map.buildVerticality) map.buildVerticality({ mat, mat2, brickMat, panelMat, tileMat, plankMat, floorMat, crateMat });
@@ -1333,6 +1403,56 @@ function buildDustTunnelRoof(tr){
     rib.castShadow = true;
     mapGroup.add(rib);
   }
+}
+
+// a standalone house: four walls plus a flat roof, so it reads as an actual
+// building sitting out in the open rather than just another room under the
+// map's own ceiling. One wall (doorSide: 'n'|'s'|'e'|'w') gets a full-height
+// doorway; the other three get a window instead - a gap with a solid sill
+// below and header above, so it's real geometry you can see/shoot through
+// while standing but can't walk through (the sill blocks the collision test
+// band right where a standing player's body is) and can't see through while
+// crouched (below the sill).
+const HOUSE_WALL_T = 0.5, HOUSE_DOOR_GAP = 2.2, HOUSE_WIN_GAP = 2.0, HOUSE_WIN_SILL = 1.4, HOUSE_WIN_OPEN = 1.2;
+function buildHouse(x, z, w, d, wallMat, roofMat, doorSide){
+  const h = WALL_H, hw = w/2, hd = d/2, T = HOUSE_WALL_T;
+
+  function nsWall(cz, len, gapMode){ // runs along X, thickness in Z
+    if(!gapMode){ addBlock(x, h/2, cz, len, h, T, wallMat); return; }
+    const gapLen = gapMode==='door' ? HOUSE_DOOR_GAP : HOUSE_WIN_GAP;
+    const stub = (len-gapLen)/2;
+    if(stub <= 0.3){ addBlock(x, h/2, cz, len, h, T, wallMat); return; }
+    addBlock(x-(len-stub)/2, h/2, cz, stub, h, T, wallMat);
+    addBlock(x+(len-stub)/2, h/2, cz, stub, h, T, wallMat);
+    if(gapMode==='window'){
+      addBlock(x, HOUSE_WIN_SILL/2, cz, gapLen, HOUSE_WIN_SILL, T, wallMat);
+      const headerH = h-HOUSE_WIN_SILL-HOUSE_WIN_OPEN;
+      if(headerH>0.1) addBlock(x, h-headerH/2, cz, gapLen, headerH, T, wallMat);
+    }
+  }
+  function ewWall(cx, len, gapMode){ // runs along Z, thickness in X
+    if(!gapMode){ addBlock(cx, h/2, z, T, h, len, wallMat); return; }
+    const gapLen = gapMode==='door' ? HOUSE_DOOR_GAP : HOUSE_WIN_GAP;
+    const stub = (len-gapLen)/2;
+    if(stub <= 0.3){ addBlock(cx, h/2, z, T, h, len, wallMat); return; }
+    addBlock(cx, h/2, z-(len-stub)/2, T, h, stub, wallMat);
+    addBlock(cx, h/2, z+(len-stub)/2, T, h, stub, wallMat);
+    if(gapMode==='window'){
+      addBlock(cx, HOUSE_WIN_SILL/2, z, T, HOUSE_WIN_SILL, gapLen, wallMat);
+      const headerH = h-HOUSE_WIN_SILL-HOUSE_WIN_OPEN;
+      if(headerH>0.1) addBlock(cx, h-headerH/2, z, T, headerH, gapLen, wallMat);
+    }
+  }
+
+  nsWall(z-hd, w, doorSide==='n' ? 'door' : 'window');
+  nsWall(z+hd, w, doorSide==='s' ? 'door' : 'window');
+  ewWall(x-hw, d, doorSide==='w' ? 'door' : 'window');
+  ewWall(x+hw, d, doorSide==='e' ? 'door' : 'window');
+
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(w+0.4, 0.3, d+0.4), roofMat);
+  roof.position.set(x, h+0.15, z);
+  roof.castShadow = true; roof.receiveShadow = true;
+  mapGroup.add(roof);
 }
 
 // a lintel bar over a doorway/chokepoint gap, purely decorative, so it
