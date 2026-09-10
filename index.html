@@ -1116,7 +1116,16 @@ const MAPS = [
     // sunk below grade too (see buildVerticality), so the roof drops with
     // it for a properly cramped ~3.4-unit clear height instead of towering
     // over a floor that's no longer where it used to be.
-    tunnelRoof: { xRange:[-34,-13], zRange:[-21,16], y:1.2 },
+    // zRange is kept to exactly the FLAT sunken run (z in [-15,9], matching
+    // the addPlatform call below) rather than the full [-21,16] span that
+    // includes both ramps - the ramps climb back up to ground level (y=0)
+    // at their outer ends, where a standing player's eye height (1.7) is
+    // already above this roof's fixed y=1.2, so covering them here made the
+    // camera clip straight through the roof mesh while walking down/up
+    // either ramp. Leaving the ramp mouths open-sky (like a real dug
+    // stairwell down into a covered passage) costs nothing collision-wise
+    // (the roof was always visual-only) and removes the clipping entirely.
+    tunnelRoof: { xRange:[-34,-13], zRange:[-15,9], y:1.2 },
     // lintels over Mid Doors and Long Doors so those chokepoints read as
     // actual doorways rather than two wall stubs that happen to stop
     doorArches: [ [0,-2,4.5], [23,8,4] ],
