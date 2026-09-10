@@ -182,7 +182,7 @@
 
   <div id="controlsHelp">
     <div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div>
-    <div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch</div>
+    <div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch (toggle) &nbsp; <b>SPACE</b> jump</div>
     <div><b>Q/E</b> lean (toggle) &nbsp; <b>ESC</b> release cursor</div>
   </div>
 
@@ -290,7 +290,7 @@
   <div class="prompt" id="overlayPrompt">CLICK TO ENGAGE</div>
   <div class="legend">
     <div><b>WASD</b> move &nbsp;&nbsp; <b>MOUSE</b> aim &nbsp;&nbsp; <b>LEFT CLICK</b> fire</div>
-    <div><b>R</b> reload &nbsp;&nbsp; <b>SHIFT</b> sprint &nbsp;&nbsp; <b>CTRL</b> crouch &nbsp;&nbsp; <b>Q / E</b> lean</div>
+    <div><b>R</b> reload &nbsp;&nbsp; <b>SHIFT</b> sprint &nbsp;&nbsp; <b>CTRL</b> crouch &nbsp;&nbsp; <b>SPACE</b> jump &nbsp;&nbsp; <b>Q / E</b> lean</div>
   </div>
 </div>
 
@@ -541,10 +541,19 @@ scene.add(yawObject);
 let pitch = 0, yaw = 0;
 let leanAmount = 0, leanTarget = 0; // -1 left .. 1 right
 let leanState = 0; // toggled by Q/E (not held) - see the keydown handler below
+let crouchToggled = false; // toggled by Ctrl (not held) - same reasoning as lean
+const JUMP_SPEED = 7, GRAVITY = 24; // peaks ~1 unit up, ~0.6s of air time
+let jumping = false, jumpVel = 0, jumpOffset = 0;
+let groundFollowY = EYE_STAND; // terrain-following eye height, eased separately from the jump arc - see updatePlayerMovement
 window.addEventListener('keydown', e=>{
-  if(e.repeat) return; // ignore OS key-repeat, otherwise holding the key would rapidly flip the toggle
+  if(e.repeat) return; // ignore OS key-repeat - otherwise holding the key would rapidly re-trigger these
   if(e.code==='KeyQ') leanState = leanState===-1 ? 0 : -1;
   if(e.code==='KeyE') leanState = leanState===1 ? 0 : 1;
+  if(e.code==='ControlLeft' || e.code==='ControlRight') crouchToggled = !crouchToggled;
+  if(e.code==='Space' && engaged && !playerDead && !roundCleared && !jumping){
+    jumping = true;
+    jumpVel = JUMP_SPEED;
+  }
 });
 let crouching = false, crouchAmount = 0;
 
@@ -1385,7 +1394,7 @@ let sprinting=false;
 function updatePlayerMovement(dt){
   const forward = (keys['KeyW']?1:0) - (keys['KeyS']?1:0);
   const strafe = (keys['KeyD']?1:0) - (keys['KeyA']?1:0);
-  crouching = !!keys['ControlLeft'] || !!keys['ControlRight'];
+  crouching = crouchToggled;
   sprinting = !!keys['ShiftLeft'] && forward>0 && !crouching;
 
   leanTarget = leanState;
@@ -1415,7 +1424,19 @@ function updatePlayerMovement(dt){
 
   const groundY = groundHeightAt(yawObject.position.x, yawObject.position.z);
   const targetEyeY = groundY + (crouching?EYE_CROUCH:EYE_STAND);
-  yawObject.position.y += (targetEyeY - yawObject.position.y) * Math.min(1, dt*10);
+  groundFollowY += (targetEyeY - groundFollowY) * Math.min(1, dt*10);
+
+  // jump: a simple velocity/gravity arc added ON TOP of the terrain-following
+  // eye height above, rather than folded into that eased value - the ease
+  // is tuned for smoothly climbing stairs/platform edges, and blending a
+  // ballistic arc through the same easing would just damp the jump into
+  // mush instead of a real hop
+  if(jumping){
+    jumpVel -= GRAVITY*dt;
+    jumpOffset += jumpVel*dt;
+    if(jumpOffset <= 0){ jumpOffset = 0; jumpVel = 0; jumping = false; }
+  }
+  yawObject.position.y = groundFollowY + jumpOffset;
 
   // lean offset: shift camera sideways + roll. Camera is a child of yawObject,
   // which already carries the yaw rotation, so the offset must be expressed
@@ -1462,7 +1483,7 @@ let engaged = false;     // game is running (either control scheme)
 let dragLook = false;    // fallback scheme active (no OS-level cursor capture)
 function updateControlsHint(){
   document.getElementById('controlsHelp').innerHTML =
-    '<div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div><div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch &nbsp; <b>Q/E</b> lean (toggle) &nbsp; <b>ESC</b> release</div>';
+    '<div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div><div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch (toggle) &nbsp; <b>SPACE</b> jump &nbsp; <b>Q/E</b> lean (toggle) &nbsp; <b>ESC</b> release</div>';
 }
 
 function fallbackEngage(){
@@ -2483,7 +2504,8 @@ function netApplyRoundInit(msg){
   updateHealthHUD();
   const sp = activeMap.spawn2 || activeMap.spawn;
   yawObject.position.set(sp[0], EYE_STAND, sp[1]);
-  yaw = 0; pitch = 0; leanState = 0;
+  yaw = 0; pitch = 0; leanState = 0; crouchToggled = false;
+  jumping = false; jumpVel = 0; jumpOffset = 0; groundFollowY = EYE_STAND;
   document.getElementById('mapName').textContent = activeMap.name;
   // engageGame() requests real mouse capture (pointer lock), which browsers
   // only grant from a genuine, synchronous user click - calling it here
@@ -2631,7 +2653,8 @@ function pvpRespawnLocal(needsClick){
   playerHealth = 100; playerDead = false; net.pvpRespawning = false;
   updateHealthHUD();
   yawObject.position.set(sp[0], EYE_STAND, sp[1]);
-  yaw = 0; pitch = 0; leanState = 0;
+  yaw = 0; pitch = 0; leanState = 0; crouchToggled = false;
+  jumping = false; jumpVel = 0; jumpOffset = 0; groundFollowY = EYE_STAND;
   if(needsClick) showOverlay('BREACH <span>PROTOCOL</span>', 'PVP MATCH', 'CLICK TO ENGAGE', false);
   else document.getElementById('overlay').classList.add('hidden');
 }
@@ -2647,8 +2670,13 @@ function netApplyPvpHit(dmg){
     playerDead = true;
     net.theirKills++; updateMpHUD();
     netSend({t:'killedBy'});
-    showOverlay('ELIMINATED', 'RESPAWNING...', 'STANDBY', false);
-    setTimeout(()=> pvpRespawnLocal(!engaged), 2000);
+    showOverlay('ELIMINATED', 'CHOOSE YOUR LOADOUT', 'STANDBY', false);
+    // same loadout screen as match start - letting the click there double
+    // as the re-engage gesture means no separate "click to respawn" step
+    setTimeout(()=>{
+      document.getElementById('overlay').classList.add('hidden');
+      document.getElementById('weaponSelectScreen').classList.remove('hidden');
+    }, 1400);
   }
 }
 
@@ -2738,7 +2766,8 @@ function resetRound(nextRound){
   updateHealthHUD();
   spawnRound(); // may switch maps first, so activeMap.spawn below is current
   yawObject.position.set(activeMap.spawn[0], EYE_STAND, activeMap.spawn[1]);
-  yaw = 0; pitch = 0; leanState = 0;
+  yaw = 0; pitch = 0; leanState = 0; crouchToggled = false;
+  jumping = false; jumpVel = 0; jumpOffset = 0; groundFollowY = EYE_STAND;
   engageGame();
 }
 
