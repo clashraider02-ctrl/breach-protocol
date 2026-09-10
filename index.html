@@ -554,7 +554,7 @@ let pitch = 0, yaw = 0;
 let leanAmount = 0, leanTarget = 0; // -1 left .. 1 right
 let leanState = 0; // toggled by Q/E (not held) - see the keydown handler below
 let crouchToggled = false; // toggled by Ctrl (not held) - same reasoning as lean
-const JUMP_SPEED = 7, GRAVITY = 24; // peaks ~1 unit up, ~0.6s of air time
+const JUMP_SPEED = 7.5, GRAVITY = 24; // peaks ~1.17 units up (clears CRATE_HEIGHT with room to spare), ~0.6s of air time
 let jumping = false, jumpVel = 0, jumpOffset = 0;
 let groundFollowY = EYE_STAND; // terrain-following eye height, eased separately from the jump arc - see updatePlayerMovement
 window.addEventListener('keydown', e=>{
@@ -759,6 +759,9 @@ function playHurt(){
 // LEVEL GEOMETRY - three rotating maps, one active at a time
 // ---------------------------------------------------------------------------
 const WALL_H = 4;
+// low enough to clear with a normal jump (see JUMP_SPEED/GRAVITY below - peak
+// is ~1.1 units), while still standing tall enough to duck behind for cover
+const CRATE_HEIGHT = 0.72;
 
 const mapGroup = new THREE.Group();   // walls/floor/ceiling/crates for the ACTIVE map only
 const enemyGroup = new THREE.Group(); // enemies live here, independent of map rebuilds
@@ -1301,7 +1304,9 @@ function buildMap(map){
 
   buildShell(mat, mat2, floorMat, ceilMat, map);
   map.partitions.forEach(([x,z,w,d,rotY])=> addBlock(x, WALL_H/2, z, w, WALL_H, d, mat2, rotY));
-  map.crates.forEach(([x,z])=> addBlock(x, 0.5, z, 1.1, 1.0, 1.1, crateMat));
+  // crates are built as mini standable platforms (not a plain solid block)
+  // so a player can actually jump up and stand on one - see CRATE_HEIGHT
+  map.crates.forEach(([x,z])=> addPlatform(x, z, 1.1, 1.1, CRATE_HEIGHT, crateMat));
 
   if(map.tunnelRoof) buildDustTunnelRoof(map.tunnelRoof);
   if(map.doorArches) map.doorArches.forEach(([x,z,w])=> buildArch(x,z,w));
@@ -1434,8 +1439,17 @@ function updatePlayerMovement(dt){
   // after moving, re-sample ground height at the new spot and ease the eye
   // height toward it. That easing is what makes stairs/platform edges feel
   // like a smooth step up rather than a teleport.
+  // jumpOffset is folded into the collision height too (one frame stale,
+  // from before this frame's jump-physics update below - imperceptible at
+  // 60fps): without it, jumping had zero effect on horizontal collision at
+  // all, since the test band always sat at ground level regardless of how
+  // high the camera currently was - a low obstacle (a crate) was exactly as
+  // solid mid-jump as standing still, so there was no way to ever hop over
+  // or onto one no matter how high you could jump. Walls/platforms are all
+  // WALL_H (4 units) or taller, far beyond the jump's ~1-unit reach, so this
+  // only ever matters for something actually low enough to clear.
   const footY = groundHeightAt(yawObject.position.x, yawObject.position.z);
-  const res = collideAndSlide(yawObject.position, dx, dz, footY);
+  const res = collideAndSlide(yawObject.position, dx, dz, footY + jumpOffset);
   yawObject.position.x = res.x;
   yawObject.position.z = res.z;
 
