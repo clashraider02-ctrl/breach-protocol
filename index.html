@@ -103,10 +103,11 @@
   #overlay .legend b{ color:#b8b4a8; }
 
   /* map select - the first screen the player sees */
-  #mapSelectScreen{ position:fixed; inset:0; background:rgba(6,6,8,.97); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:25; text-align:center; padding:24px; box-sizing:border-box; }
-  #mapSelectScreen h1{ color:var(--text); font-family:var(--font-display); font-weight:700; font-size:42px; letter-spacing:8px; margin:0 0 10px; text-wrap:balance; }
-  #mapSelectScreen h1 span{ color:var(--danger); }
-  #mapSelectScreen > p{ color:var(--text-dim); font-family:var(--font-mono); font-size:12px; letter-spacing:3px; margin:4px 0 28px; }
+  #mapSelectScreen, #weaponSelectScreen{ position:fixed; inset:0; background:rgba(6,6,8,.97); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:25; text-align:center; padding:24px; box-sizing:border-box; }
+  #mapSelectScreen h1, #weaponSelectScreen h1{ color:var(--text); font-family:var(--font-display); font-weight:700; font-size:42px; letter-spacing:8px; margin:0 0 10px; text-wrap:balance; }
+  #mapSelectScreen h1 span, #weaponSelectScreen h1 span{ color:var(--danger); }
+  #mapSelectScreen > p, #weaponSelectScreen > p{ color:var(--text-dim); font-family:var(--font-mono); font-size:12px; letter-spacing:3px; margin:4px 0 28px; }
+  #weaponGrid{ display:grid; grid-template-columns:repeat(2, minmax(220px,260px)); gap:16px; }
   #mapGrid{ display:grid; grid-template-columns:repeat(2, minmax(220px,260px)); gap:16px; }
   .mapCard{ position:relative; padding:18px 20px 16px; background:#15161a; border:1px solid #35373a; border-left:4px solid var(--swatch); cursor:pointer; text-align:left; display:flex; flex-direction:column; gap:8px; font-family:inherit; transition:background .15s, border-color .15s, transform .15s; }
   .mapCard:hover, .mapCard:focus-visible{ background:#1c1e23; border-color:var(--swatch); transform:translateY(-2px); outline:none; }
@@ -182,7 +183,7 @@
   <div id="controlsHelp">
     <div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div>
     <div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch</div>
-    <div><b>Q/E</b> lean &nbsp; <b>ESC</b> release cursor</div>
+    <div><b>Q/E</b> lean (toggle) &nbsp; <b>ESC</b> release cursor</div>
   </div>
 
   <div id="dmgFlash"></div>
@@ -253,6 +254,34 @@
     </button>
   </div>
   <p class="mapSelectHint">Rotates through the remaining maps every 5 rounds</p>
+</div>
+
+<div id="weaponSelectScreen" class="hidden">
+  <h1>BREACH <span>PROTOCOL</span></h1>
+  <p>SELECT LOADOUT</p>
+  <div id="weaponGrid">
+    <button class="mapCard" data-weapon="PISTOL" style="--swatch:#555a5e">
+      <span class="mapCardName">PISTOL</span>
+      <span class="mapCardDesc">Sidearm. Light and fast, plenty of reserve ammo.</span>
+    </button>
+    <button class="mapCard" data-weapon="SMG" style="--swatch:#54613f">
+      <span class="mapCardName">SMG</span>
+      <span class="mapCardDesc">High fire rate, close range. Falls off at distance.</span>
+    </button>
+    <button class="mapCard" data-weapon="AR" style="--swatch:#2b2d2f">
+      <span class="mapCardName">AR</span>
+      <span class="mapCardDesc">Balanced all-rounder. Strong from mid to long range.</span>
+    </button>
+    <button class="mapCard" data-weapon="SHOTGUN" style="--swatch:#6b4a2c">
+      <span class="mapCardName">SHOTGUN</span>
+      <span class="mapCardDesc">Devastating up close, nearly useless at range.</span>
+    </button>
+    <button class="mapCard" data-weapon="SNIPER" style="--swatch:#2a3324">
+      <span class="mapCardName">SNIPER</span>
+      <span class="mapCardDesc">Scoped. Guaranteed headshot kill, heavy body damage.</span>
+    </button>
+  </div>
+  <p class="mapSelectHint">You'll keep this weapon on respawn</p>
 </div>
 
 <div id="overlay" class="hidden">
@@ -511,6 +540,12 @@ scene.add(yawObject);
 
 let pitch = 0, yaw = 0;
 let leanAmount = 0, leanTarget = 0; // -1 left .. 1 right
+let leanState = 0; // toggled by Q/E (not held) - see the keydown handler below
+window.addEventListener('keydown', e=>{
+  if(e.repeat) return; // ignore OS key-repeat, otherwise holding the key would rapidly flip the toggle
+  if(e.code==='KeyQ') leanState = leanState===-1 ? 0 : -1;
+  if(e.code==='KeyE') leanState = leanState===1 ? 0 : 1;
+});
 let crouching = false, crouchAmount = 0;
 
 // weapon view-model - gunGroup is the persistent camera-child container
@@ -1353,7 +1388,7 @@ function updatePlayerMovement(dt){
   crouching = !!keys['ControlLeft'] || !!keys['ControlRight'];
   sprinting = !!keys['ShiftLeft'] && forward>0 && !crouching;
 
-  leanTarget = (keys['KeyE']?1:0) - (keys['KeyQ']?1:0);
+  leanTarget = leanState;
   leanAmount += (leanTarget - leanAmount) * Math.min(1, dt*8);
   crouchAmount += ((crouching?1:0) - crouchAmount) * Math.min(1, dt*8);
 
@@ -1427,7 +1462,7 @@ let engaged = false;     // game is running (either control scheme)
 let dragLook = false;    // fallback scheme active (no OS-level cursor capture)
 function updateControlsHint(){
   document.getElementById('controlsHelp').innerHTML =
-    '<div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div><div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch &nbsp; <b>Q/E</b> lean &nbsp; <b>ESC</b> release</div>';
+    '<div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div><div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch &nbsp; <b>Q/E</b> lean (toggle) &nbsp; <b>ESC</b> release</div>';
 }
 
 function fallbackEngage(){
@@ -2448,7 +2483,7 @@ function netApplyRoundInit(msg){
   updateHealthHUD();
   const sp = activeMap.spawn2 || activeMap.spawn;
   yawObject.position.set(sp[0], EYE_STAND, sp[1]);
-  yaw = 0; pitch = 0;
+  yaw = 0; pitch = 0; leanState = 0;
   document.getElementById('mapName').textContent = activeMap.name;
   // engageGame() requests real mouse capture (pointer lock), which browsers
   // only grant from a genuine, synchronous user click - calling it here
@@ -2585,18 +2620,18 @@ function netApplyPvpInit(msg){
   document.getElementById('mapName').textContent = activeMap.name;
   net.myKills = 0; net.theirKills = 0;
   updateMpHUD();
-  // same reasoning as netApplyRoundInit above: only auto-continue if we're
-  // already engaged (real pointer lock already granted from an earlier
-  // click) - otherwise this needs an actual click to request it, not a
-  // silently-refused call from a network message handler
-  pvpRespawnLocal(!engaged);
+  // each side picks their own starting weapon independently - the actual
+  // pvpRespawnLocal/engageGame call happens from the weaponCard click
+  // handler below, since (same reasoning as netApplyRoundInit) pointer
+  // lock can only be requested from a real click, not a message handler
+  document.getElementById('weaponSelectScreen').classList.remove('hidden');
 }
 function pvpRespawnLocal(needsClick){
   const sp = net.role==='host' ? activeMap.spawn : (activeMap.spawn2 || activeMap.spawn);
   playerHealth = 100; playerDead = false; net.pvpRespawning = false;
   updateHealthHUD();
   yawObject.position.set(sp[0], EYE_STAND, sp[1]);
-  yaw = 0; pitch = 0;
+  yaw = 0; pitch = 0; leanState = 0;
   if(needsClick) showOverlay('BREACH <span>PROTOCOL</span>', 'PVP MATCH', 'CLICK TO ENGAGE', false);
   else document.getElementById('overlay').classList.add('hidden');
 }
@@ -2703,7 +2738,7 @@ function resetRound(nextRound){
   updateHealthHUD();
   spawnRound(); // may switch maps first, so activeMap.spawn below is current
   yawObject.position.set(activeMap.spawn[0], EYE_STAND, activeMap.spawn[1]);
-  yaw = 0; pitch = 0;
+  yaw = 0; pitch = 0; leanState = 0;
   engageGame();
 }
 
@@ -2752,7 +2787,7 @@ document.getElementById('joinCodeInput').addEventListener('keydown', e=>{
 // user gesture, so this does double duty instead of asking for a second
 // click right after). In multiplayer this button only exists for the host
 // - it also broadcasts the choice so the guest can mirror it.
-document.querySelectorAll('.mapCard').forEach(btn=>{
+document.querySelectorAll('#mapGrid .mapCard').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     mapOffset = +btn.dataset.map;
     document.getElementById('mapSelectScreen').classList.add('hidden');
@@ -2760,12 +2795,24 @@ document.querySelectorAll('.mapCard').forEach(btn=>{
       roundNum = 1;
       ensureMap();
       netSend({t:'pvpInit', mapIndex: currentMapIndex});
-      pvpRespawnLocal(false); // host's own click, right below, is what actually engages
-      engageGame();
+      document.getElementById('weaponSelectScreen').classList.remove('hidden'); // own loadout pick, then weaponCard's click engages
       return;
     }
     roundNum = 1;
     resetRound(true); // spawnRound() (inside resetRound) broadcasts roundInit when hosting co-op
+  });
+});
+
+// PvP loadout pick: each side chooses independently (host and guest both
+// land here, host via the mapCard handler above, guest via netApplyPvpInit)
+// and the click itself doubles as the real user gesture pointer lock needs,
+// same trick as the map/mode cards use elsewhere.
+document.querySelectorAll('#weaponGrid .mapCard').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    equipWeapon(btn.dataset.weapon);
+    document.getElementById('weaponSelectScreen').classList.add('hidden');
+    pvpRespawnLocal(false);
+    engageGame();
   });
 });
 updateMpHUD();
