@@ -64,6 +64,17 @@
   #healthLabel{ font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:3px; margin-bottom:4px; color:var(--text-dim); }
   #stanceLabel{ font-family:var(--font-mono); font-size:11px; letter-spacing:1px; margin-top:6px; color:var(--ok); }
 
+  /* bottom-left minimap - stacked directly above the health bar */
+  #minimapWrap{ position:absolute; left:18px; bottom:88px; width:150px; height:150px; background:rgba(8,8,10,.55); border:1px solid #3a3a3a; }
+  #minimap{ display:block; width:100%; height:100%; }
+
+  /* hold-Tab scoreboard, multiplayer only */
+  #scoreboard{ position:absolute; left:50%; top:80px; transform:translateX(-50%); background:rgba(8,8,10,.88); border:1px solid #3a3a3a; padding:14px 20px; min-width:280px; }
+  #scoreboardTitle{ font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:4px; color:var(--caution); text-align:center; margin-bottom:10px; }
+  .sbRow{ display:grid; grid-template-columns:1fr 70px 70px; font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); padding:4px 0; text-align:right; }
+  .sbRow span:first-child{ text-align:left; }
+  .sbHead{ color:var(--text-dim); font-size:10.5px; border-bottom:1px solid #35373a; padding-bottom:6px; margin-bottom:2px; }
+
   /* bottom-right ammo */
   #ammoPanel{ position:absolute; right:20px; bottom:16px; text-align:right; color:var(--text); }
   #weaponLabel{ font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:3px; color:var(--text-dim); margin-bottom:2px; }
@@ -163,6 +174,15 @@
     <div id="healthLabel">HEALTH</div>
     <div id="healthWrap"><div id="healthBar"></div></div>
     <div id="stanceLabel">STANDING</div>
+  </div>
+
+  <div id="minimapWrap"><canvas id="minimap" width="150" height="150"></canvas></div>
+
+  <div id="scoreboard" class="hidden">
+    <div id="scoreboardTitle">SCOREBOARD</div>
+    <div class="sbRow sbHead"><span>PLAYER</span><span>KILLS</span><span>DEATHS</span></div>
+    <div class="sbRow"><span>YOU</span><span id="sbYouK">0</span><span id="sbYouD">0</span></div>
+    <div class="sbRow"><span id="sbThemLabel">THEM</span><span id="sbThemK">0</span><span id="sbThemD">0</span></div>
   </div>
 
   <div id="ammoPanel">
@@ -1478,6 +1498,7 @@ function ensureMap(forceIdx){
     activeMap = MAPS[idx];
     clearMap();
     buildMap(activeMap);
+    cacheMinimapGeometry();
     // an outdoor map's distant haze should fade toward its sky colour, not
     // the indoor maps' dark backdrop - otherwise the "sky" reads as a lit
     // patch floating over a dark void past the walls
@@ -1494,6 +1515,21 @@ function ensureMap(forceIdx){
 const keys = {};
 window.addEventListener('keydown', e=>{ keys[e.code]=true; });
 window.addEventListener('keyup', e=>{ keys[e.code]=false; });
+
+// hold-Tab scoreboard - multiplayer only, shown for as long as the key is
+// held (standard FPS convention) rather than toggled on/off by a press.
+// preventDefault stops the browser's own Tab focus-cycling from stealing
+// keyboard focus away from the page while playing.
+window.addEventListener('keydown', e=>{
+  if(e.code==='Tab' && netIsMultiplayer() && engaged){
+    e.preventDefault();
+    updateScoreboard();
+    document.getElementById('scoreboard').classList.remove('hidden');
+  }
+});
+window.addEventListener('keyup', e=>{
+  if(e.code==='Tab') document.getElementById('scoreboard').classList.add('hidden');
+});
 
 const PLAYER_RADIUS = 0.35;
 // reused every call instead of allocating a Box3 + 2 Vector3 per attempt -
@@ -1633,8 +1669,9 @@ let locked = false;      // true mouse-look via Pointer Lock is active
 let engaged = false;     // game is running (either control scheme)
 let dragLook = false;    // fallback scheme active (no OS-level cursor capture)
 function updateControlsHint(){
+  const tabHint = netIsMultiplayer() ? ' &nbsp; <b>TAB</b> scoreboard' : '';
   document.getElementById('controlsHelp').innerHTML =
-    '<div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div><div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch (toggle) &nbsp; <b>SPACE</b> jump &nbsp; <b>Q/E</b> lean (toggle) &nbsp; <b>ESC</b> release</div>';
+    '<div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div><div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch (toggle) &nbsp; <b>SPACE</b> jump &nbsp; <b>Q/E</b> lean (toggle) &nbsp; <b>ESC</b> release'+tabHint+'</div>';
 }
 
 function fallbackEngage(){
@@ -2135,7 +2172,15 @@ function updateEnemyCountHUD(){
   document.getElementById('enemyCount').textContent = 'HOSTILES: '+alive;
 }
 
-function damageEnemy(enemy, amount){
+// broadcasts the co-op scoreboard to the guest - called from every spot
+// that changes hostKills/guestKills/hostDeaths/guestDeaths. A no-op outside
+// co-op host, so call sites don't need their own mode/role guard.
+function netSendStats(){
+  if(net.role!=='host' || net.mode!=='coop') return;
+  netSend({ t:'stats', hostKills:net.hostKills, guestKills:net.guestKills, hostDeaths:net.hostDeaths, guestDeaths:net.guestDeaths });
+  updateScoreboard();
+}
+function damageEnemy(enemy, amount, byGuest){
   if(enemy.state==='DEAD') return;
   enemy.health -= amount;
   enemy.hitFlashTimer = 0.15;
@@ -2145,6 +2190,7 @@ function damageEnemy(enemy, amount){
     enemy.group.position.y = 0.05;
     spawnPickup(enemy.group.position.x, enemy.group.position.z, enemy.weapon);
     updateEnemyCountHUD();
+    if(net.mode==='coop'){ if(byGuest) net.guestKills++; else net.hostKills++; netSendStats(); }
     checkRoundClear();
   } else {
     // getting shot alerts the enemy immediately, and calls in anyone nearby
@@ -2219,7 +2265,10 @@ function damagePlayer(amount, fromEnemy){
   if(playerHealth<=0){
     playerHealth = 0;
     playerDead = true;
-    if(net.role==='host' && net.mode==='coop') netSend({t:'squadDown'});
+    if(net.role==='host' && net.mode==='coop'){
+      net.hostDeaths++; netSendStats();
+      netSend({t:'squadDown'});
+    }
     showOverlay('YOU ARE <span>DOWN</span>', 'ELIMINATED BY HOSTILE FORCE', 'CLICK TO RETRY ROUND', false);
   }
 }
@@ -2473,6 +2522,11 @@ const net = {
   puppets: new Map(),          // guest-side, co-op: netId -> enemy puppet object
   guestHealth: 100, guestDown: false, // host-authoritative record of the guest's health, co-op
   myKills: 0, theirKills: 0,    // pvp
+  // co-op scoreboard - host-authoritative (same reasoning as guestHealth
+  // above: only the host ever actually applies bot damage/kills or knows
+  // the true moment the guest's health hits zero), broadcast to the guest
+  // via netSendStats() whenever any of these change
+  hostKills: 0, guestKills: 0, hostDeaths: 0, guestDeaths: 0,
   pvpRespawning: false,
   lastSendT: 0,
   sinceEnemySend: 0,
@@ -2601,9 +2655,14 @@ function onNetMessage(msg){
     case 'xf': net.remote = msg; if(net.role==='host') net.remoteEverConnected = true; break; // transform, both directions
     case 'enemies': netApplyEnemySnapshot(msg.list); break;   // host -> guest, co-op
     case 'hitEnemy':                                          // guest -> host, co-op
-      if(net.role==='host'){ const en = enemies[msg.i]; if(en) damageEnemy(en, msg.dmg); }
+      if(net.role==='host'){ const en = enemies[msg.i]; if(en) damageEnemy(en, msg.dmg, true); }
       break;
     case 'guestHealth': netApplyGuestHealth(msg.health); break; // host -> guest, co-op
+    case 'stats':                                             // host -> guest, co-op
+      net.hostKills=msg.hostKills; net.guestKills=msg.guestKills;
+      net.hostDeaths=msg.hostDeaths; net.guestDeaths=msg.guestDeaths;
+      updateScoreboard();
+      break;
     case 'pickupSpawn':                                         // host -> guest, co-op
       if(net.role==='guest') spawnPickup(msg.x, msg.z, msg.weaponType, msg.id, true);
       break;
@@ -2647,6 +2706,7 @@ function netDamageGuest(amount){
   if(net.guestHealth<=0) return;
   net.guestHealth = Math.max(0, net.guestHealth-amount);
   netSend({t:'guestHealth', health:net.guestHealth});
+  if(net.guestHealth<=0){ net.guestDeaths++; netSendStats(); }
   if(net.guestHealth<=0 && !playerDead && !roundCleared){
     // shared-fate round: either player going down pauses the whole squad's
     // simulation (enemies freeze, same gate as a solo death) until a retry
@@ -2891,6 +2951,68 @@ function netApplyPvpHit(dmg){
   }
 }
 
+// ---------------------------------------------------------------------------
+// MINIMAP (bottom-left) - a top-down trace of the current map's static
+// collision geometry (walls/houses/crates - anything in wallBoxes), redrawn
+// on a throttled timer rather than every frame. A minimap doesn't need 60Hz
+// to read fine, and this keeps its per-frame cost close to zero.
+// ---------------------------------------------------------------------------
+const minimapCanvas = document.getElementById('minimap');
+const minimapCtx = minimapCanvas.getContext('2d');
+let minimapWalls = []; // cached per-map: [{x0,z0,x1,z1}, ...] in world space
+let minimapScale = 1;
+function cacheMinimapGeometry(){
+  minimapWalls = wallBoxes.map(b => ({ x0:b.min.x, z0:b.min.z, x1:b.max.x, z1:b.max.z }));
+  const clamp = (activeMap && activeMap.clamp) || {x:21.3, z:16.3};
+  const size = minimapCanvas.width; // square canvas
+  minimapScale = size / (2 * Math.max(clamp.x, clamp.z) + 4);
+}
+let minimapTimer = 0;
+function updateMinimap(dt){
+  minimapTimer -= dt;
+  if(minimapTimer > 0) return;
+  minimapTimer = 0.1; // ~10Hz
+  drawMinimap();
+}
+function drawMinimap(){
+  const ctx = minimapCtx;
+  const size = minimapCanvas.width;
+  const cx = size/2, cy = size/2;
+  ctx.clearRect(0, 0, size, size);
+  // world (x,z) -> canvas (px,py), centred on world origin. z maps straight
+  // to canvas y (no sign flip) so -Z ("north", the direction every map's
+  // spawn faces into) reads as "up" on the minimap, same as the maps' own
+  // layout convention.
+  const toPx = (x,z) => [cx + x*minimapScale, cy + z*minimapScale];
+
+  ctx.strokeStyle = 'rgba(185,180,165,.55)';
+  ctx.lineWidth = 1;
+  for(const w of minimapWalls){
+    const [x0,y0] = toPx(w.x0, w.z0);
+    const [x1,y1] = toPx(w.x1, w.z1);
+    ctx.strokeRect(Math.min(x0,x1), Math.min(y0,y1), Math.abs(x1-x0)||1, Math.abs(y1-y0)||1);
+  }
+
+  // teammate (multiplayer only), drawn before the local player so the
+  // player's own marker stays on top if the two overlap
+  if(netIsMultiplayer() && net.connected && net.remote){
+    const [px,py] = toPx(net.remote.x, net.remote.z);
+    ctx.fillStyle = net.mode==='pvp' ? '#c2472f' : '#4a9d6e';
+    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+  }
+
+  // local player - a small triangle pointing in the current facing direction
+  const [px,py] = toPx(yawObject.position.x, yawObject.position.z);
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(yaw);
+  ctx.fillStyle = '#e8c468';
+  ctx.beginPath();
+  ctx.moveTo(0, -6); ctx.lineTo(4, 5); ctx.lineTo(-4, 5);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
 let _lastMpHudHtml = null;
 function updateMpHUD(){
   const el = document.getElementById('mpPanel');
@@ -2907,6 +3029,28 @@ function updateMpHUD(){
   // only changes on a kill/heal - skip the DOM write (and its style/layout
   // cost) when nothing actually changed
   if(html !== _lastMpHudHtml){ el.innerHTML = html; _lastMpHudHtml = html; }
+}
+
+// hold-Tab scoreboard (both online modes) - visibility is toggled by the
+// keydown/keyup handlers near the other input bindings; this just refreshes
+// the numbers, called both when the board is shown and whenever a kill/
+// death actually changes so it stays live if you're already holding Tab
+function updateScoreboard(){
+  let youK, youD, themK, themD, themLabel;
+  if(net.mode==='pvp'){
+    youK = net.myKills; youD = net.theirKills;
+    themK = net.theirKills; themD = net.myKills;
+    themLabel = 'THEM';
+  } else {
+    themLabel = 'TEAMMATE';
+    if(net.role==='host'){ youK=net.hostKills; youD=net.hostDeaths; themK=net.guestKills; themD=net.guestDeaths; }
+    else { youK=net.guestKills; youD=net.guestDeaths; themK=net.hostKills; themD=net.hostDeaths; }
+  }
+  document.getElementById('sbYouK').textContent = youK;
+  document.getElementById('sbYouD').textContent = youD;
+  document.getElementById('sbThemK').textContent = themK;
+  document.getElementById('sbThemD').textContent = themD;
+  document.getElementById('sbThemLabel').textContent = themLabel;
 }
 
 // always-on perf readout (not just multiplayer) - FPS tells you if THIS
@@ -3039,6 +3183,13 @@ document.querySelectorAll('#mapGrid .mapCard').forEach(btn=>{
       return;
     }
     roundNum = 1;
+    if(net.mode==='coop'){
+      // fresh co-op session - the scoreboard is a running match total, not
+      // a per-round one, so it only resets here (session start), never on
+      // an individual round transition/retry
+      net.hostKills=0; net.guestKills=0; net.hostDeaths=0; net.guestDeaths=0;
+      netSendStats();
+    }
     resetRound(true); // spawnRound() (inside resetRound) broadcasts roundInit when hosting co-op
   });
 });
@@ -3122,6 +3273,7 @@ function animate(){
   updateMpHUD();
   checkPerfDowngrade(dt);
   updatePerfPanel();
+  if(engaged) updateMinimap(dt);
   if(impactEffects.length) updateImpactEffects(dt);
   renderer.render(scene, camera);
 }
