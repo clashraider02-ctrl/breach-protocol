@@ -2321,6 +2321,8 @@ function onNetMessage(msg){
     case 'squadCleared': netApplySquadCleared(); break;         // host -> guest, co-op
     case 'hitPlayer': netApplyPvpHit(msg.dmg); break;           // pvp, either direction
     case 'killedBy': net.myKills++; updateMpHUD(); break;       // pvp
+    case 'ping': netSend({t:'pong', ts: msg.ts}); break;
+    case 'pong': net.rtt = Math.round(performance.now() - msg.ts); break;
   }
 }
 
@@ -2522,6 +2524,14 @@ function netTick(dt){
       netSend({ t:'enemies', list: enemies.map(en=>({ i:en.netId, x:en.group.position.x, y:en.group.position.y, z:en.group.position.z, facing:en.facing, state:en.state })) });
     }
   }
+  // round-trip ping, so "it feels laggy" can be told apart from a real
+  // network delay (high number here) vs a local rendering/simulation
+  // slowdown (fine ping, bad FPS) - shown in the HUD via updateMpHUD()
+  net.sincePingT = (net.sincePingT||0) + dt;
+  if(net.sincePingT >= 2){
+    net.sincePingT = 0;
+    netSend({ t:'ping', ts: performance.now() });
+  }
 }
 
 // ---- PvP ----
@@ -2566,12 +2576,18 @@ function updateMpHUD(){
   const el = document.getElementById('mpPanel');
   if(!netIsMultiplayer()){ el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
+  let line;
   if(net.mode==='pvp'){
-    el.innerHTML = `YOU <b>${net.myKills}</b> &nbsp; THEM <b>${net.theirKills}</b>`;
+    line = `YOU <b>${net.myKills}</b> &nbsp; THEM <b>${net.theirKills}</b>`;
   } else {
     const hp = Math.max(0, Math.round(net.role==='host' ? net.guestHealth : (net.remote?.health ?? 100)));
-    el.innerHTML = `TEAMMATE <b class="${hp<=0?'down':'ok'}">${hp<=0?'DOWN':hp+'%'}</b>`;
+    line = `TEAMMATE <b class="${hp<=0?'down':'ok'}">${hp<=0?'DOWN':hp+'%'}</b>`;
   }
+  // FPS tells you if THIS machine is struggling; PING tells you if it's the
+  // network (relay hop) instead - if FPS is fine but ping is high, that's
+  // the connection, not something more code can fix on either end
+  const pingText = net.rtt!=null ? net.rtt+'ms' : '...';
+  el.innerHTML = line + `<br>FPS <b>${fps}</b> &nbsp; PING <b>${pingText}</b>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2670,12 +2686,19 @@ document.querySelectorAll('.mapCard').forEach(btn=>{
 updateMpHUD();
 
 let lastT = performance.now();
+let fps = 60, fpsAccumT = 0, fpsAccumN = 0;
 function animate(){
   requestAnimationFrame(animate);
   const now = performance.now();
   let dt = (now-lastT)/1000;
   dt = Math.min(dt, 0.05);
   lastT = now;
+
+  // rolling FPS, refreshed twice a second - not shown unless in multiplayer
+  // (see updateMpHUD), used to tell "the network is slow" apart from "this
+  // machine is actually struggling to render/simulate the frame"
+  fpsAccumT += dt; fpsAccumN++;
+  if(fpsAccumT >= 0.5){ fps = Math.round(fpsAccumN/fpsAccumT); fpsAccumT = 0; fpsAccumN = 0; }
 
   if(engaged && !playerDead && !roundCleared){
     updatePlayerMovement(dt);
