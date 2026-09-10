@@ -81,6 +81,9 @@
   #mpPanel b{ color:var(--text); }
   #mpPanel .ok{ color:var(--ok); }
   #mpPanel .down{ color:var(--danger); }
+  #perfPanel{ position:absolute; right:20px; top:90px; color:#5f5c54; font-family:var(--font-mono); font-size:10px; letter-spacing:1px; text-align:right; }
+  #perfPanel b{ color:var(--text-dim); }
+  #perfPanel .bad{ color:var(--danger) !important; }
 
   #controlsHelp{ position:absolute; left:18px; top:14px; color:var(--text-dim); font-family:var(--font-mono); font-size:10.5px; line-height:1.6; letter-spacing:.3px; }
   #controlsHelp b{ color:#b8b4a8; }
@@ -174,6 +177,7 @@
   </div>
 
   <div id="mpPanel" class="hidden"></div>
+  <div id="perfPanel" class="hidden"></div>
 
   <div id="controlsHelp">
     <div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div>
@@ -2576,18 +2580,47 @@ function updateMpHUD(){
   const el = document.getElementById('mpPanel');
   if(!netIsMultiplayer()){ el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
-  let line;
   if(net.mode==='pvp'){
-    line = `YOU <b>${net.myKills}</b> &nbsp; THEM <b>${net.theirKills}</b>`;
+    el.innerHTML = `YOU <b>${net.myKills}</b> &nbsp; THEM <b>${net.theirKills}</b>`;
   } else {
     const hp = Math.max(0, Math.round(net.role==='host' ? net.guestHealth : (net.remote?.health ?? 100)));
-    line = `TEAMMATE <b class="${hp<=0?'down':'ok'}">${hp<=0?'DOWN':hp+'%'}</b>`;
+    el.innerHTML = `TEAMMATE <b class="${hp<=0?'down':'ok'}">${hp<=0?'DOWN':hp+'%'}</b>`;
   }
-  // FPS tells you if THIS machine is struggling; PING tells you if it's the
-  // network (relay hop) instead - if FPS is fine but ping is high, that's
-  // the connection, not something more code can fix on either end
-  const pingText = net.rtt!=null ? net.rtt+'ms' : '...';
-  el.innerHTML = line + `<br>FPS <b>${fps}</b> &nbsp; PING <b>${pingText}</b>`;
+}
+
+// always-on perf readout (not just multiplayer) - FPS tells you if THIS
+// machine is struggling to render/simulate the frame; PING (multiplayer
+// only) tells you if it's the network/relay hop instead. A "lag" report
+// with fine FPS and high ping needs a different fix than one with bad FPS.
+function updatePerfPanel(){
+  const el = document.getElementById('perfPanel');
+  if(!engaged){ el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  const fpsClass = fps<30 ? 'bad' : '';
+  let html = `FPS <b class="${fpsClass}">${fps}</b>`;
+  if(netIsMultiplayer()){
+    const pingText = net.rtt!=null ? net.rtt+'ms' : '...';
+    html += ` &nbsp; PING <b>${pingText}</b>`;
+  }
+  if(perfDowngraded) html += ` &nbsp; <b>(reduced quality)</b>`;
+  el.innerHTML = html;
+}
+
+// if FPS stays low for a few seconds after engaging, this machine is
+// genuinely struggling to render the scene - shadow mapping is by far the
+// most expensive thing this renderer does, so drop it (and the pixel
+// ratio) once, automatically, rather than leaving the player stuck at a
+// bad framerate with no idea why or what to do about it
+let perfDowngraded = false, lowFpsTimer = 0;
+function checkPerfDowngrade(dt){
+  if(perfDowngraded || !engaged) return;
+  lowFpsTimer = fps < 30 ? lowFpsTimer+dt : 0;
+  if(lowFpsTimer > 4){
+    perfDowngraded = true;
+    renderer.shadowMap.enabled = false;
+    renderer.setPixelRatio(1);
+    sun.castShadow = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2748,6 +2781,8 @@ function animate(){
 
   netTick(dt);
   updateMpHUD();
+  checkPerfDowngrade(dt);
+  updatePerfPanel();
   if(impactEffects.length) updateImpactEffects(dt);
   renderer.render(scene, camera);
 }
