@@ -1788,6 +1788,8 @@ function buildEnemy(t, weaponType){
     reactionTimer: 0,
     fireTimer: 0.25+Math.random()*0.35,
     losTimer: 0,
+    losCheckTimer: Math.random()*0.1, // staggered so every enemy's (expensive) LOS raycast doesn't land on the same frame
+    canSeeCached: false,
     lastKnownPlayerPos: null,
     searchTimer: 0,
     hitFlashTimer: 0,
@@ -1929,6 +1931,22 @@ function nearestCover(pos){
 }
 
 const _losDir = new THREE.Vector3();
+// reused scratch objects for updateEnemy/attemptEnemyShot's per-frame math -
+// these ran per enemy per frame (several per enemy while in COMBAT), and
+// allocating fresh Vector3/Color instances there was enough sustained GC
+// pressure to show up as stutter/high CPU even on strong hardware, since
+// it's on the hottest loop in the game (every enemy, every frame)
+const _enemyEyePos = new THREE.Vector3();
+const _toPlayerDir = new THREE.Vector3();
+const _facingDir = new THREE.Vector3();
+const _flatToPlayer = new THREE.Vector3();
+const _combatForward = new THREE.Vector3();
+const _combatRight = new THREE.Vector3();
+const _combatMoveVec = new THREE.Vector3();
+const _combatDesired = new THREE.Vector3();
+const _guestPosScratch = new THREE.Vector3();
+const ENEMY_COMBAT_COLOR = new THREE.Color(0xd23c3c);
+const ENEMY_IDLE_COLOR = new THREE.Color(0x8a2e2e);
 function hasLineOfSight(fromVec, toVec){
   const dir = _losDir.subVectors(toVec, fromVec);
   const dist = dir.length();
@@ -1969,26 +1987,40 @@ function updateEnemy(en, dt){
     en.hitFlashTimer -= dt;
     en.bodyMesh.material.color.setHex(0xffffff);
   } else {
-    en.bodyMesh.material.color.copy(en.state==='COMBAT'? new THREE.Color(0xd23c3c) : new THREE.Color(0x8a2e2e));
+    en.bodyMesh.material.color.copy(en.state==='COMBAT'? ENEMY_COMBAT_COLOR : ENEMY_IDLE_COLOR);
   }
 
-  const eyePos = en.group.position.clone(); eyePos.y += 1.55; // relative to whatever floor this enemy is standing on, not an absolute world height
+  const eyePos = _enemyEyePos.copy(en.group.position); eyePos.y += 1.55; // relative to whatever floor this enemy is standing on, not an absolute world height
   const target = pickEnemyTarget(en, eyePos, dt); // in co-op, may be the connected guest instead of the local player
-  const playerPos = target.pos.clone();
+  const playerPos = target.pos; // only ever read below, never mutated - safe to skip cloning it every frame
   const distToPlayer = eyePos.distanceTo(playerPos);
 
   // detection cone + LOS, exposure reduced when player crouches/leans.
   // Wide enough to actually cover the long sightlines on the bigger maps
   // (Long-style corridors, open desert lanes) - a short-range cone made
   // enemies feel like they were barely trying, since they'd stand in
-  // plain view down a 30+ unit corridor and never react.
-  let canSee = false;
+  // plain view down a 30+ unit corridor and never react. The raycast
+  // itself is the single most expensive thing an enemy does each frame
+  // (it walks every wall mesh in the level), so it only actually re-fires
+  // on a short, per-enemy-staggered timer instead of every frame - the
+  // cached result carries over between raycasts, which at ~12-15Hz is far
+  // faster than human reaction time and imperceptible in play.
+  let canSee = en.canSeeCached;
   if(distToPlayer < 26*currentDifficulty.detectionRangeMult){
-    const toPlayer = new THREE.Vector3().subVectors(playerPos, eyePos).normalize();
-    const facingDir = new THREE.Vector3(Math.sin(en.facing), 0, Math.cos(en.facing));
-    const dot = facingDir.dot(new THREE.Vector3(toPlayer.x,0,toPlayer.z).normalize());
-    const coneOk = en.state==='COMBAT' ? true : dot > 0.2; // wide awareness once already fighting
-    if(coneOk && hasLineOfSight(eyePos, playerPos)) canSee = true;
+    en.losCheckTimer -= dt;
+    if(en.losCheckTimer<=0){
+      en.losCheckTimer = 0.07 + Math.random()*0.04;
+      const toPlayer = _toPlayerDir.subVectors(playerPos, eyePos).normalize();
+      const facingDir = _facingDir.set(Math.sin(en.facing), 0, Math.cos(en.facing));
+      const flatToPlayer = _flatToPlayer.set(toPlayer.x, 0, toPlayer.z).normalize();
+      const dot = facingDir.dot(flatToPlayer);
+      const coneOk = en.state==='COMBAT' ? true : dot > 0.2; // wide awareness once already fighting
+      canSee = coneOk && hasLineOfSight(eyePos, playerPos);
+      en.canSeeCached = canSee;
+    }
+  } else {
+    canSee = false;
+    en.canSeeCached = false;
   }
 
   if(canSee){
@@ -2033,9 +2065,9 @@ function updateEnemy(en, dt){
       en.coverTarget = nearestCover(en.group.position);
     }
 
-    const forward = new THREE.Vector3(Math.sin(en.facing), 0, Math.cos(en.facing));
-    const right = new THREE.Vector3(Math.cos(en.facing), 0, -Math.sin(en.facing));
-    let moveVec;
+    const forward = _combatForward.set(Math.sin(en.facing), 0, Math.cos(en.facing));
+    const right = _combatRight.set(Math.cos(en.facing), 0, -Math.sin(en.facing));
+    const moveVec = _combatMoveVec.set(0,0,0);
     const coverDist = en.coverTarget ? dist2D(en.group.position, en.coverTarget) : Infinity;
     if(coverDist > 1.8){
       // still closing on cover - run toward it while staying turned to
@@ -2043,7 +2075,7 @@ function updateEnemy(en, dt){
       // reads as a tactical repositioning rather than a retreat
       const dx = en.coverTarget[0]-en.group.position.x, dz = en.coverTarget[1]-en.group.position.z;
       const d = Math.hypot(dx,dz) || 1;
-      moveVec = new THREE.Vector3(dx/d, 0, dz/d).multiplyScalar(3.0);
+      moveVec.set(dx/d, 0, dz/d).multiplyScalar(3.0);
     } else {
       // holding the position: strafe side to side on a timer (not a
       // per-frame coin flip, which reads as jitter more than movement)
@@ -2052,12 +2084,12 @@ function updateEnemy(en, dt){
         en.strafeTimer = 0.6 + Math.random()*0.6;
         en.strafeDir *= -1;
       }
-      moveVec = right.multiplyScalar(en.strafeDir * 2.2);
-      if(distToPlayer > 15) moveVec.add(forward.clone().multiplyScalar(2.0));
+      moveVec.copy(right).multiplyScalar(en.strafeDir * 2.2);
+      if(distToPlayer > 15) moveVec.addScaledVector(forward, 2.0);
     }
-    if(distToPlayer < 4) moveVec = forward.clone().multiplyScalar(-2.2); // too close - fall back regardless of cover
+    if(distToPlayer < 4) moveVec.copy(forward).multiplyScalar(-2.2); // too close - fall back regardless of cover
 
-    const desired = en.group.position.clone().add(moveVec.multiplyScalar(dt));
+    const desired = _combatDesired.copy(en.group.position).addScaledVector(moveVec, dt);
     const combatFootY = groundHeightAt(en.group.position.x, en.group.position.z);
     const res = collideAndSlide(en.group.position, desired.x-en.group.position.x, desired.z-en.group.position.z, combatFootY);
     en.group.position.x = res.x; en.group.position.z = res.z;
@@ -2112,7 +2144,7 @@ function faceToward(en, target, dt){
 
 function attemptEnemyShot(en, distance, target){
   target = target || { pos: yawObject.position, isLocal:true };
-  const eyePos = en.group.position.clone(); eyePos.y += 1.55; // relative to whatever floor this enemy is standing on, not an absolute world height
+  const eyePos = _enemyEyePos.copy(en.group.position); eyePos.y += 1.55; // relative to whatever floor this enemy is standing on, not an absolute world height
   const playerPos = target.pos;
   if(!hasLineOfSight(eyePos, playerPos)) return false;
   playShot(true);
@@ -2339,7 +2371,7 @@ function netOnModeChosen(mode){
 // ---- co-op: enemy targeting extension (used by updateEnemy/attemptEnemyShot above) ----
 function getGuestPos(){
   if(net.role==='host' && net.mode==='coop' && net.connected && net.remote && net.guestHealth>0){
-    return new THREE.Vector3(net.remote.x, net.remote.y, net.remote.z);
+    return _guestPosScratch.set(net.remote.x, net.remote.y, net.remote.z);
   }
   return null;
 }
@@ -2576,22 +2608,29 @@ function netApplyPvpHit(dmg){
   }
 }
 
+let _lastMpHudHtml = null;
 function updateMpHUD(){
   const el = document.getElementById('mpPanel');
   if(!netIsMultiplayer()){ el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
+  let html;
   if(net.mode==='pvp'){
-    el.innerHTML = `YOU <b>${net.myKills}</b> &nbsp; THEM <b>${net.theirKills}</b>`;
+    html = `YOU <b>${net.myKills}</b> &nbsp; THEM <b>${net.theirKills}</b>`;
   } else {
     const hp = Math.max(0, Math.round(net.role==='host' ? net.guestHealth : (net.remote?.health ?? 100)));
-    el.innerHTML = `TEAMMATE <b class="${hp<=0?'down':'ok'}">${hp<=0?'DOWN':hp+'%'}</b>`;
+    html = `TEAMMATE <b class="${hp<=0?'down':'ok'}">${hp<=0?'DOWN':hp+'%'}</b>`;
   }
+  // this runs every frame (called from animate()) but the actual content
+  // only changes on a kill/heal - skip the DOM write (and its style/layout
+  // cost) when nothing actually changed
+  if(html !== _lastMpHudHtml){ el.innerHTML = html; _lastMpHudHtml = html; }
 }
 
 // always-on perf readout (not just multiplayer) - FPS tells you if THIS
 // machine is struggling to render/simulate the frame; PING (multiplayer
 // only) tells you if it's the network/relay hop instead. A "lag" report
 // with fine FPS and high ping needs a different fix than one with bad FPS.
+let _lastPerfPanelHtml = null;
 function updatePerfPanel(){
   const el = document.getElementById('perfPanel');
   if(!engaged){ el.classList.add('hidden'); return; }
@@ -2603,7 +2642,11 @@ function updatePerfPanel(){
     html += ` &nbsp; PING <b>${pingText}</b>`;
   }
   if(perfDowngraded) html += ` &nbsp; <b>(reduced quality)</b>`;
-  el.innerHTML = html;
+  // fps/ping only actually change a couple times a second, but this used to
+  // run every frame - rewriting innerHTML forces a style/layout pass even
+  // when the text is identical, which adds up to real per-frame cost for
+  // no visible benefit
+  if(html !== _lastPerfPanelHtml){ el.innerHTML = html; _lastPerfPanelHtml = html; }
 }
 
 // if FPS stays low for a few seconds after engaging, this machine is
