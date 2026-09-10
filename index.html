@@ -2484,6 +2484,25 @@ function netApplySquadCleared(){
 }
 
 // ---- co-op: round/map mirroring + enemy puppets on the guest ----
+// the guest lands right next to the host instead of at the map's separate
+// spawn2 - spawn2 exists purely for PvP, deliberately far across the map
+// from spawn so a 1v1 duel doesn't start with both players staring at each
+// other. In co-op that same distance just means the squad starts split up,
+// and spawn2's own position was never chosen with bot proximity in mind -
+// keeping the team together at the one spawn point that's actually proven
+// safe (solo mode has always started there) is what prevents either player
+// getting camped by a bot the instant the round begins. Tries a handful of
+// small offsets around the host's exact spot and takes the first one clear
+// of walls, rather than a single fixed offset that might land inside
+// geometry on some maps' narrower spawn nooks.
+function coopGuestSpawnPos(){
+  const [sx, sz] = activeMap.spawn;
+  const offsets = [[1.1,0],[-1.1,0],[0,1.1],[0,-1.1],[1.1,1.1],[-1.1,-1.1],[1.1,-1.1],[-1.1,1.1]];
+  for(const [ox,oz] of offsets){
+    if(boxIsFree(sx+ox, sz+oz, 0)) return [sx+ox, sz+oz];
+  }
+  return [sx, sz]; // every offset blocked - fall back to the host's exact spot rather than somewhere unvalidated
+}
 function netApplyRoundInit(msg){
   ensureMap(msg.mapIndex);
   document.getElementById('roundNum').textContent = msg.roundNum;
@@ -2502,7 +2521,7 @@ function netApplyRoundInit(msg){
   updateEnemyCountHUD();
   playerDead = false; playerHealth = 100; roundCleared = false;
   updateHealthHUD();
-  const sp = activeMap.spawn2 || activeMap.spawn;
+  const sp = coopGuestSpawnPos();
   yawObject.position.set(sp[0], EYE_STAND, sp[1]);
   yaw = 0; pitch = 0; leanState = 0; crouchToggled = false;
   jumping = false; jumpVel = 0; jumpOffset = 0; groundFollowY = EYE_STAND;
