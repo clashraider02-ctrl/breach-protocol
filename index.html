@@ -2403,8 +2403,19 @@ function netApplyRoundInit(msg){
   yawObject.position.set(sp[0], EYE_STAND, sp[1]);
   yaw = 0; pitch = 0;
   document.getElementById('mapName').textContent = activeMap.name;
-  if(document.getElementById('overlay') && !engaged) engageGame();
-  document.getElementById('overlay').classList.add('hidden');
+  // engageGame() requests real mouse capture (pointer lock), which browsers
+  // only grant from a genuine, synchronous user click - calling it here
+  // would be firing it from a network message handler instead, which gets
+  // silently refused and falls back to a degraded mode (no real cursor
+  // capture, it stays visible and just tracks raw movement). If we're
+  // already engaged from an earlier click this session, carry on
+  // seamlessly; otherwise show the normal click-to-engage prompt so the
+  // guest's own click is what actually requests it.
+  if(engaged){
+    document.getElementById('overlay').classList.add('hidden');
+  } else {
+    showOverlay('BREACH <span>PROTOCOL</span>', 'ROUND '+msg.roundNum, 'CLICK TO ENGAGE', false);
+  }
 }
 function clearNetPuppets(){ net.puppets.clear(); }
 function netApplyEnemySnapshot(list){
@@ -2519,17 +2530,20 @@ function netApplyPvpInit(msg){
   document.getElementById('mapName').textContent = activeMap.name;
   net.myKills = 0; net.theirKills = 0;
   updateMpHUD();
-  pvpRespawnLocal();
-  if(!engaged) engageGame();
-  document.getElementById('overlay').classList.add('hidden');
+  // same reasoning as netApplyRoundInit above: only auto-continue if we're
+  // already engaged (real pointer lock already granted from an earlier
+  // click) - otherwise this needs an actual click to request it, not a
+  // silently-refused call from a network message handler
+  pvpRespawnLocal(!engaged);
 }
-function pvpRespawnLocal(){
+function pvpRespawnLocal(needsClick){
   const sp = net.role==='host' ? activeMap.spawn : (activeMap.spawn2 || activeMap.spawn);
   playerHealth = 100; playerDead = false; net.pvpRespawning = false;
   updateHealthHUD();
   yawObject.position.set(sp[0], EYE_STAND, sp[1]);
   yaw = 0; pitch = 0;
-  document.getElementById('overlay').classList.add('hidden');
+  if(needsClick) showOverlay('BREACH <span>PROTOCOL</span>', 'PVP MATCH', 'CLICK TO ENGAGE', false);
+  else document.getElementById('overlay').classList.add('hidden');
 }
 function netApplyPvpHit(dmg){
   if(playerDead) return;
@@ -2544,7 +2558,7 @@ function netApplyPvpHit(dmg){
     net.theirKills++; updateMpHUD();
     netSend({t:'killedBy'});
     showOverlay('ELIMINATED', 'RESPAWNING...', 'STANDBY', false);
-    setTimeout(pvpRespawnLocal, 2000);
+    setTimeout(()=> pvpRespawnLocal(!engaged), 2000);
   }
 }
 
@@ -2645,7 +2659,7 @@ document.querySelectorAll('.mapCard').forEach(btn=>{
       roundNum = 1;
       ensureMap();
       netSend({t:'pvpInit', mapIndex: currentMapIndex});
-      pvpRespawnLocal();
+      pvpRespawnLocal(false); // host's own click, right below, is what actually engages
       engageGame();
       return;
     }
