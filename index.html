@@ -280,6 +280,10 @@
       <span class="mapCardName">CARGO</span>
       <span class="mapCardDesc">Container ship deck. Long lanes between stacked containers, a bridge house at the bow.</span>
     </button>
+    <button class="mapCard" data-map="7" style="--swatch:#8a7a5c">
+      <span class="mapCardName">RUINS</span>
+      <span class="mapCardDesc">Destroyed city block. Broken wall stubs and rubble piles carve up the open ground.</span>
+    </button>
   </div>
   <p class="mapSelectHint">Rotates through the remaining maps every 5 rounds</p>
 </div>
@@ -1528,6 +1532,49 @@ const MAPS = [
         });
       });
     },
+  },
+  {
+    // destroyed city block - short broken-wall stubs and scattered rubble
+    // piles (crates) stand in for intact buildings, rather than one big
+    // enclosed structure. Two early drafts each had a real dead-center
+    // obstacle problem caught by walk-simulation: a full-length center
+    // partition split the map with no gap, and two rubble-pile crates sat
+    // exactly on the x=0 spawn<->spawn2 line and directly in front of the
+    // house door - both invisible to a simple boxIsFree check on the crate's
+    // own point, since the crate itself isn't at the door/spawn coordinate,
+    // only in the direct path between them. Final layout: spawn, spawn2,
+    // every enemy pos/patrol point, every crate's approach, and the house
+    // door/interior all verified reachable from spawn via the real
+    // movement/collision code.
+    name: 'RUINS',
+    outdoor: true,
+    floorSize: [60, 60],
+    clamp: { x:28, z:28 },
+    spawn: [0, 24],
+    spawn2: [0, -24],
+    tint: { wall:0x7a7268, wall2:0x655e54, floor:0x59544a, crate:0x8a7a5c, ceil:0xb8c4cc,
+      indoorWall:0x6e6558, indoorFloor:0x544e40 },
+    outerWalls: [
+      [-30, 0, 0.6, 60],
+      [30, 0, 0.6, 60],
+      [0, 30, 60, 0.6],
+      [0, -30, 60, 0.6],
+    ],
+    partitions: [
+      [-13, 8, 6, 0.5],
+      [13, -8, 6, 0.5],
+      [-13, -8, 0.5, 6],
+      [13, 8, 0.5, 6],
+    ],
+    crates: [[-6,4],[6,4],[-6,-4],[6,-4],[-20,0],[20,6],[3,18],[-3,-18]],
+    enemyTemplates: [
+      { pos:[-9,3],  patrol:[[-9,3],[-9,-3],[-16,-3]] },
+      { pos:[9,-3],  patrol:[[9,-3],[9,3],[16,3]] },
+      { pos:[0,12],  patrol:[[0,12],[-5,15],[5,15]] },
+      { pos:[0,-12], patrol:[[0,-12],[-5,-15],[5,-15]] },
+      { pos:[-20,-10],patrol:[[-20,-10],[-23,-6],[-17,-6]] },
+    ],
+    houses: [ { x:20, z:-4, w:8, d:6, door:'s' } ],
   },
 ];
 
