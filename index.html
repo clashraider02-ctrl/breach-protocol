@@ -69,9 +69,9 @@
   #minimap{ display:block; width:100%; height:100%; }
 
   /* hold-Tab scoreboard, multiplayer only */
-  #scoreboard{ position:absolute; left:50%; top:80px; transform:translateX(-50%); background:rgba(8,8,10,.88); border:1px solid #3a3a3a; padding:14px 20px; min-width:280px; }
+  #scoreboard{ position:absolute; left:50%; top:80px; transform:translateX(-50%); background:rgba(8,8,10,.88); border:1px solid #3a3a3a; padding:14px 20px; min-width:340px; }
   #scoreboardTitle{ font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:4px; color:var(--caution); text-align:center; margin-bottom:10px; }
-  .sbRow{ display:grid; grid-template-columns:1fr 70px 70px; font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); padding:4px 0; text-align:right; }
+  .sbRow{ display:grid; grid-template-columns:1fr 70px 70px 70px; font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); padding:4px 0; text-align:right; }
   .sbRow span:first-child{ text-align:left; }
   .sbHead{ color:var(--text-dim); font-size:10.5px; border-bottom:1px solid #35373a; padding-bottom:6px; margin-bottom:2px; }
 
@@ -180,9 +180,9 @@
 
   <div id="scoreboard" class="hidden">
     <div id="scoreboardTitle">SCOREBOARD</div>
-    <div class="sbRow sbHead"><span>PLAYER</span><span>KILLS</span><span>DEATHS</span></div>
-    <div class="sbRow"><span>YOU</span><span id="sbYouK">0</span><span id="sbYouD">0</span></div>
-    <div class="sbRow"><span id="sbThemLabel">THEM</span><span id="sbThemK">0</span><span id="sbThemD">0</span></div>
+    <div class="sbRow sbHead"><span>PLAYER</span><span>KILLS</span><span>DEATHS</span><span>ASSISTS</span></div>
+    <div class="sbRow"><span>YOU</span><span id="sbYouK">0</span><span id="sbYouD">0</span><span id="sbYouA">0</span></div>
+    <div class="sbRow"><span id="sbThemLabel">THEM</span><span id="sbThemK">0</span><span id="sbThemD">0</span><span id="sbThemA">0</span></div>
   </div>
 
   <div id="ammoPanel">
@@ -275,6 +275,10 @@
     <button class="mapCard" data-map="5" style="--swatch:#6b6a30">
       <span class="mapCardName">NUKE</span>
       <span class="mapCardDesc">Twin houses split the map down the middle. Flank left, flank right, or push the alley between them.</span>
+    </button>
+    <button class="mapCard" data-map="6" style="--swatch:#b5502a">
+      <span class="mapCardName">CARGO</span>
+      <span class="mapCardDesc">Container ship deck. Long lanes between stacked containers, a bridge house at the bow.</span>
     </button>
   </div>
   <p class="mapSelectHint">Rotates through the remaining maps every 5 rounds</p>
@@ -646,7 +650,7 @@ let pitch = 0, yaw = 0;
 let leanAmount = 0, leanTarget = 0; // -1 left .. 1 right
 let leanState = 0; // toggled by Q/E (not held) - see the keydown handler below
 let crouchToggled = false; // toggled by Ctrl (not held) - same reasoning as lean
-const JUMP_SPEED = 7.5, GRAVITY = 24; // peaks ~1.17 units up (clears CRATE_HEIGHT with room to spare), ~0.6s of air time
+const JUMP_SPEED = 9, GRAVITY = 24; // peaks ~1.69 units up (still far short of WALL_H=4, no risk of vaulting a wall), ~0.75s of air time - a punchier, more satisfying hop than before, still clears CRATE_HEIGHT with a big margin
 let jumping = false, jumpVel = 0, jumpOffset = 0;
 let groundFollowY = EYE_STAND; // terrain-following eye height, eased separately from the jump arc - see updatePlayerMovement
 window.addEventListener('keydown', e=>{
@@ -1477,6 +1481,52 @@ const MAPS = [
     buildVerticality({ plankMat }){
       addStairs(0, -12.5, 4, 4, 'z', 0, 2.4, plankMat, 6);
       addPlatform(0, -15.5, 6, 4, 2.4, plankMat);
+    },
+  },
+  {
+    // container ship deck - a long narrow corridor map. Two rows of stacked
+    // shipping containers (solid, too tall to jump on - taller than the
+    // player's jump apex) split the lanes into west/center/east. A bridge
+    // house sits at the stern end near spawn2. Full layout (spawn/spawn2,
+    // every enemy pos and patrol point, every crate, and the house door)
+    // verified reachable from spawn by simulating an actual walk there
+    // through the real movement/collision code. The patrol lanes for the
+    // two flank enemies run at x=+/-9.5, outside the containers (which sit
+    // at x=+/-6.5) - an earlier draft placed those patrol points directly
+    // on the container centers, which is why they're offset here.
+    name: 'CARGO',
+    outdoor: true,
+    floorSize: [28, 88],
+    clamp: { x:13, z:43 },
+    spawn: [0, 36],
+    spawn2: [0, -32],
+    tint: { wall:0x5c6670, wall2:0x3f4750, floor:0x53575c, crate:0xb5502a, ceil:0x9fc3dd,
+      indoorWall:0x6b6f74, indoorFloor:0x484c50 },
+    outerWalls: [
+      [-13, 0, 0.6, 86],
+      [13, 0, 0.6, 86],
+      [0, 43, 26, 0.6],
+      [0, -43, 26, 0.6],
+    ],
+    partitions: [],
+    crates: [[-2.5,-13],[2.5,-13],[-2.5,4],[2.5,4],[-10.5,25],[10.5,25],[-10.5,-25],[10.5,-25]],
+    enemyTemplates: [
+      { pos:[-9.5,-13], patrol:[[-9.5,-13],[-9.5,-4.5],[-9.5,4]] },
+      { pos:[9.5,-13],  patrol:[[9.5,-13],[9.5,-4.5],[9.5,4]] },
+      { pos:[0,0],       patrol:[[0,0],[0,-10],[0,10]] },
+      { pos:[0,-22],     patrol:[[0,-22],[-6,-22],[6,-22]] },
+      { pos:[0,20],      patrol:[[0,20],[-6,20],[6,20]] },
+    ],
+    houses: [ { x:0, z:-36, w:8, d:6, door:'s' } ],
+    // two rows of large solid "container" blocks (2.6 tall - above the ~1.7
+    // unit jump apex, so unlike crates these aren't standable-on)
+    buildVerticality({ crateMat }){
+      const rowZ = [-13,-4.5,4,12.5];
+      [-6.5,6.5].forEach(rowX=>{
+        rowZ.forEach(cz=>{
+          addBlock(rowX, 1.3, cz, 2.6, 2.6, 6, crateMat);
+        });
+      });
     },
   },
 ];
@@ -2374,13 +2424,18 @@ function updateEnemyCountHUD(){
 // co-op host, so call sites don't need their own mode/role guard.
 function netSendStats(){
   if(net.role!=='host' || net.mode!=='coop') return;
-  netSend({ t:'stats', hostKills:net.hostKills, guestKills:net.guestKills, hostDeaths:net.hostDeaths, guestDeaths:net.guestDeaths });
+  netSend({ t:'stats', hostKills:net.hostKills, guestKills:net.guestKills, hostDeaths:net.hostDeaths, guestDeaths:net.guestDeaths,
+    hostAssists:net.hostAssists, guestAssists:net.guestAssists });
   updateScoreboard();
 }
 function damageEnemy(enemy, amount, byGuest){
   if(enemy.state==='DEAD') return;
   enemy.health -= amount;
   enemy.hitFlashTimer = 0.15;
+  // remember who has landed a hit on this specific enemy, so whoever
+  // *doesn't* get the kill still earns an assist if they contributed -
+  // cleared per-enemy naturally since each enemy object only ever dies once
+  if(net.mode==='coop'){ if(byGuest) enemy._dmgByGuest = true; else enemy._dmgByHost = true; }
   if(enemy.health<=0){
     enemy.state='DEAD';
     enemy.group.rotation.z = Math.PI/2.1;
@@ -2392,7 +2447,11 @@ function damageEnemy(enemy, amount, byGuest){
       spawnPickup(enemy.group.position.x+0.6, enemy.group.position.z+0.4, null, null, false, 'stim');
     }
     updateEnemyCountHUD();
-    if(net.mode==='coop'){ if(byGuest) net.guestKills++; else net.hostKills++; netSendStats(); }
+    if(net.mode==='coop'){
+      if(byGuest){ net.guestKills++; if(enemy._dmgByHost) net.hostAssists++; }
+      else { net.hostKills++; if(enemy._dmgByGuest) net.guestAssists++; }
+      netSendStats();
+    }
     checkRoundClear();
   } else {
     // getting shot alerts the enemy immediately, and calls in anyone nearby
@@ -2729,6 +2788,7 @@ const net = {
   // the true moment the guest's health hits zero), broadcast to the guest
   // via netSendStats() whenever any of these change
   hostKills: 0, guestKills: 0, hostDeaths: 0, guestDeaths: 0,
+  hostAssists: 0, guestAssists: 0, // whoever DIDN'T land the killing blow, if they still damaged that enemy at some point (see damageEnemy)
   pvpRespawning: false,
   lastSendT: 0,
   sinceEnemySend: 0,
@@ -2869,6 +2929,7 @@ function onNetMessage(msg){
     case 'stats':                                             // host -> guest, co-op
       net.hostKills=msg.hostKills; net.guestKills=msg.guestKills;
       net.hostDeaths=msg.hostDeaths; net.guestDeaths=msg.guestDeaths;
+      net.hostAssists=msg.hostAssists; net.guestAssists=msg.guestAssists;
       updateScoreboard();
       break;
     case 'pickupSpawn':                                         // host -> guest, co-op
@@ -3262,20 +3323,23 @@ function updateMpHUD(){
 // the numbers, called both when the board is shown and whenever a kill/
 // death actually changes so it stays live if you're already holding Tab
 function updateScoreboard(){
-  let youK, youD, themK, themD, themLabel;
+  let youK, youD, youA, themK, themD, themA, themLabel;
   if(net.mode==='pvp'){
-    youK = net.myKills; youD = net.theirKills;
-    themK = net.theirKills; themD = net.myKills;
+    // no third party in a 1v1, so assists are never a thing here - always 0
+    youK = net.myKills; youD = net.theirKills; youA = 0;
+    themK = net.theirKills; themD = net.myKills; themA = 0;
     themLabel = 'THEM';
   } else {
     themLabel = 'TEAMMATE';
-    if(net.role==='host'){ youK=net.hostKills; youD=net.hostDeaths; themK=net.guestKills; themD=net.guestDeaths; }
-    else { youK=net.guestKills; youD=net.guestDeaths; themK=net.hostKills; themD=net.hostDeaths; }
+    if(net.role==='host'){ youK=net.hostKills; youD=net.hostDeaths; youA=net.hostAssists; themK=net.guestKills; themD=net.guestDeaths; themA=net.guestAssists; }
+    else { youK=net.guestKills; youD=net.guestDeaths; youA=net.guestAssists; themK=net.hostKills; themD=net.hostDeaths; themA=net.hostAssists; }
   }
   document.getElementById('sbYouK').textContent = youK;
   document.getElementById('sbYouD').textContent = youD;
+  document.getElementById('sbYouA').textContent = youA;
   document.getElementById('sbThemK').textContent = themK;
   document.getElementById('sbThemD').textContent = themD;
+  document.getElementById('sbThemA').textContent = themA;
   document.getElementById('sbThemLabel').textContent = themLabel;
 }
 
@@ -3414,6 +3478,7 @@ document.querySelectorAll('#mapGrid .mapCard').forEach(btn=>{
       // a per-round one, so it only resets here (session start), never on
       // an individual round transition/retry
       net.hostKills=0; net.guestKills=0; net.hostDeaths=0; net.guestDeaths=0;
+      net.hostAssists=0; net.guestAssists=0;
       netSendStats();
     }
     resetRound(true); // spawnRound() (inside resetRound) broadcasts roundInit when hosting co-op
