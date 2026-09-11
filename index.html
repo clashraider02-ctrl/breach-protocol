@@ -487,6 +487,59 @@ const panelTexture = makePanelTexture();  panelTexture.repeat.set(2, 1);
 const tileTexture  = makeTileTexture();   tileTexture.repeat.set(6, 6);
 const plankTexture = makePlankTexture();  plankTexture.repeat.set(1, 3);
 
+// a small procedurally-drawn poster/propaganda-graphic for house interiors -
+// generated in-canvas (a color field, a bold chevron, a few text-like bars)
+// rather than pulled from any real image, so there's no copyright/asset
+// question. hue varies per call so different houses don't look identical.
+function makePosterTexture(hue){
+  hue = hue==null ? Math.random()*360 : hue;
+  const size = 256;
+  const c = document.createElement('canvas'); c.width=size; c.height=size*1.3;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = `hsl(${hue},22%,14%)`;
+  ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle = `hsl(${hue},55%,38%)`;
+  ctx.fillRect(10,10,c.width-20,c.height-20);
+  ctx.fillStyle = `hsl(${hue},15%,92%)`;
+  ctx.beginPath();
+  ctx.moveTo(c.width*0.5, c.height*0.22);
+  ctx.lineTo(c.width*0.82, c.height*0.55);
+  ctx.lineTo(c.width*0.5, c.height*0.5);
+  ctx.lineTo(c.width*0.18, c.height*0.55);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = `hsl(${hue},20%,85%)`;
+  for(let i=0;i<3;i++) ctx.fillRect(c.width*0.28, c.height*(0.68+i*0.09), c.width*0.44, c.height*0.035);
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+
+// house interior dressing - a toilet in the corner farthest from the door
+// (visual only, no collision - small enough that solid geometry there would
+// just be an annoying snag, not real cover) and a procedurally-drawn poster
+// mounted on whichever wall isn't the door (always a window wall, so it has
+// a real solid stub to sit flush against)
+function buildHouseProps(x, z, w, d, doorSide){
+  const hw = w/2, hd = d/2;
+  const toiletMat = new THREE.MeshStandardMaterial({ color:0xe8e4d8, roughness:0.3 });
+  const cx = x + (doorSide==='w' ? hw-0.6 : -(hw-0.6));
+  const cz = z + (doorSide==='n' ? hd-0.6 : -(hd-0.6));
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), toiletMat);
+  base.position.set(cx, 0.25, cz);
+  base.castShadow = true; base.receiveShadow = true;
+  mapGroup.add(base);
+  const tank = new THREE.Mesh(new THREE.BoxGeometry(0.45,0.4,0.18), toiletMat);
+  tank.position.set(cx, 0.68, cz + (cz>z ? 0.16 : -0.16));
+  tank.castShadow = true;
+  mapGroup.add(tank);
+
+  const posterMat = new THREE.MeshStandardMaterial({ map:makePosterTexture(), roughness:0.95 });
+  const poster = new THREE.Mesh(new THREE.BoxGeometry(1.3,1.7,0.04), posterMat);
+  if(doorSide==='s'){ poster.position.set(x - w*0.25, WALL_H*0.55, z-hd+0.28); }
+  else { poster.position.set(x - w*0.25, WALL_H*0.55, z+hd-0.28); }
+  mapGroup.add(poster);
+}
+
 // ---------------------------------------------------------------------------
 // WEAPONS - 5 loadouts shared by the player and enemy AI (same damage/rate/
 // spread numbers on both sides, so a dropped sniper is exactly as scary in
@@ -520,6 +573,16 @@ const WEAPONS = {
     closeRange:8, minBodyFrac:1/3, guaranteedHeadshotKill:true },
   SNIPER:  { key:'SNIPER',  label:'SNIPER',  magSize:5,  reserveMax:20,  fireRate:1.2,  auto:false, dmgMin:75, dmgMax:95,  headshotMult:1.4, spread:0.0015,pellets:1, range:130, color:0x2a3324, tier:4, accNear:0.55, accFar:0.75,
     minBodyFrac:0.7, guaranteedHeadshotKill:true, scope:{ fov:16, zoomSensMult:0.32, moveSpeed:1.1, spreadMult:0.25 } },
+  // a rare, heavy drop above the normal round progression (see
+  // randomEnemyWeapon) - a huge mag and a very fast cyclic rate at the cost
+  // of noticeably worse spread, so it shreds up close but isn't a long-range
+  // laser the way the AR/sniper are
+  MINIGUN: { key:'MINIGUN', label:'MINIGUN', magSize:150, reserveMax:300, fireRate:0.045, auto:true, dmgMin:16, dmgMax:22, headshotMult:1.5, spread:0.032, pellets:1, range:55, color:0x2f2f2f, tier:5, accNear:0.7, accFar:0.2 },
+  // melee - guaranteed one-hit kill at knife range in exchange for having
+  // basically none, and speedMult (read in updatePlayerMovement) makes you
+  // noticeably faster while it's out, for an all-in flanking playstyle
+  KNIFE:   { key:'KNIFE',   label:'KNIFE',   magSize:999, reserveMax:999, fireRate:0.45, auto:false, dmgMin:100,dmgMax:100, headshotMult:1,   spread:0,     pellets:1, range:2.4,  color:0xb8bcc0, tier:0, accNear:0.9, accFar:0.1,
+    speedMult:1.35, melee:true },
 };
 
 // enforces a weapon's damage guarantees (sniper: any range; shotgun: only
@@ -558,6 +621,11 @@ function randomEnemyWeapon(roundN){
     AR:      2 + roundN*2.2,
     SHOTGUN: 1 + roundN*1.4,
     SNIPER:  Math.max(0, roundN-1) * 1.6,
+    // both rare drops, not part of the normal per-round climb: the minigun
+    // only starts showing up once bots are already dangerous (round 4+),
+    // the knife is a flat, low-odds "for fun" pickup at any round
+    MINIGUN: Math.max(0, roundN-3) * 1.0,
+    KNIFE:   2.5,
   };
   let total = 0; for(const k in weights) total += weights[k];
   let r = Math.random()*total;
@@ -651,6 +719,18 @@ function buildViewModelParts(type){
     box(0.085,0.09,0.2,0,-0.005,0.2, gunMatDark);           // stock
     box(0.06,0.16,0.06,0,-0.12,0.06, gunMatDark, 0.22);     // grip
     muzzleZ = -0.53;
+  } else if(type==='MINIGUN'){
+    box(0.16,0.16,0.3,0,-0.02,-0.05, gunMatDark);           // bulky receiver
+    box(0.05,0.05,0.5,-0.05,0.03,-0.4);                     // barrel cluster
+    box(0.05,0.05,0.5,0.05,0.03,-0.4);
+    box(0.05,0.05,0.5,0,0.08,-0.4);
+    box(0.1,0.22,0.14,0,-0.19,0.06, gunMatDark);            // ammo drum
+    box(0.06,0.16,0.06,0,-0.13,0.15, gunMatDark, 0.2);      // grip
+    muzzleZ = -0.66;
+  } else if(type==='KNIFE'){
+    box(0.032,0.032,0.13,0,-0.03,0.05, gunMatDark);         // handle
+    box(0.05,0.012,0.22,0,0,-0.15);                         // blade
+    muzzleZ = -0.24;
   } else { // SNIPER
     box(0.08,0.09,0.5,0,0,-0.15);                           // receiver
     box(0.045,0.045,0.4,0,-0.005,-0.55);                    // long thin barrel
@@ -804,11 +884,26 @@ const raycastMeshes = []; // meshes the gun / AI LOS raycasts test against - reb
 // in boxIsFree/collideAndSlide below).
 const heightRegions = []; // rebuilt per map, checked in order (most specific first)
 const RAMP_BUFFER = 0.6; // > PLAYER_RADIUS*2 - see the comment inside groundHeightAt's ramp branch
-function groundHeightAt(x, z){
+function groundHeightAt(x, z, refEyeY){
   for(let i=0;i<heightRegions.length;i++){
     const r = heightRegions[i];
     if(x < r.x0 || x > r.x1 || z < r.z0 || z > r.z1) continue;
-    if(r.kind==='platform') return r.y;
+    if(r.kind==='platform'){
+      // a normal platform is a real solid pedestal all the way down (see
+      // addPlatform), so the only way to ever be standing inside its X/Z
+      // footprint at all is to have already climbed a ramp up onto it -
+      // unconditionally reporting its height here has always been safe.
+      // A restricted platform (currently just a stilts house's floor) is
+      // the opposite on purpose - walkable underneath, not solid - so the
+      // same unconditional report would falsely levitate anyone who just
+      // walked into its footprint from ground level, never having climbed
+      // anything. Gate it on the caller's own current (eye) height already
+      // being close to the platform's: genuinely arriving via its stairs
+      // means the ramp region already eased you most of the way up before
+      // you ever reach this platform's edge.
+      if(r.restricted && (refEyeY==null || refEyeY < r.restrictedEyeThreshold)) continue;
+      return r.y;
+    }
     // ramp: linearly interpolate between y0 (at the region's start edge)
     // and y1 (at its end edge) along whichever axis it runs - but reach
     // each target height a bit BEFORE the region's actual edge (RAMP_BUFFER)
@@ -1210,7 +1305,15 @@ const MAPS = [
     ],
     // full flood-fill validated (see FACILITY) - moved off the original spot
     // near the "Back Plat" crate, which the door opened straight into
-    houses: [ { x:-26.3, z:-1.3, w:8, d:6, door:'s' } ],
+    houses: [
+      { x:-26.3, z:-1.3, w:8, d:6, door:'s' },
+      // raised on stilts, walkable underneath - verified by direct movement
+      // testing in both directions: crossing straight underneath stays flat
+      // at ground level the whole way (no false "climb" from the elevated
+      // floor's own height region), and climbing the stairs on the south
+      // side smoothly reaches the elevated floor and back down again
+      { x:-20.3, z:16.7, w:8, d:6, door:'s', stilts:true, stiltHeight:2.4 },
+    ],
     // Tunnels gets its own lower, covered roof (distinct from the open sky
     // elsewhere) plus support ribs, so it actually reads as a tunnel
     // instead of just another walled lane - see buildDustTunnelRoof(). Now
@@ -1226,7 +1329,10 @@ const MAPS = [
     // either ramp. Leaving the ramp mouths open-sky (like a real dug
     // stairwell down into a covered passage) costs nothing collision-wise
     // (the roof was always visual-only) and removes the clipping entirely.
-    tunnelRoof: { xRange:[-34,-13], zRange:[-15,9], y:1.2 },
+    // tinted a distinct steel blue so the tunnel reads as its own space at
+    // a glance from either end, instead of blending into the same tan tone
+    // as the rest of the map
+    tunnelRoof: { xRange:[-34,-13], zRange:[-15,9], y:1.2, color:0x3a6b8a },
     // lintels over Mid Doors and Long Doors so those chokepoints read as
     // actual doorways rather than two wall stubs that happen to stop
     doorArches: [ [0,-2,4.5], [23,8,4] ],
@@ -1399,7 +1505,14 @@ function buildMap(map){
 
   if(map.tunnelRoof) buildDustTunnelRoof(map.tunnelRoof);
   if(map.doorArches) map.doorArches.forEach(([x,z,w])=> buildArch(x,z,w));
-  if(map.houses) map.houses.forEach(hs=> buildHouse(hs.x, hs.z, hs.w, hs.d, brickMat, trimMat, hs.door));
+  if(map.houses) map.houses.forEach(hs=>{
+    if(hs.stilts){
+      buildHouseOnStilts(hs.x, hs.z, hs.w, hs.d, brickMat, trimMat, hs.door, hs.stiltHeight||2.4);
+    } else {
+      buildHouse(hs.x, hs.z, hs.w, hs.d, brickMat, trimMat, hs.door);
+      buildHouseProps(hs.x, hs.z, hs.w, hs.d, hs.door);
+    }
+  });
   // the actual verticality/depth pass - raised rooms, stairs, tunnels,
   // angled cover - lives per-map right next to its layout data below
   if(map.buildVerticality) map.buildVerticality({ mat, mat2, brickMat, panelMat, tileMat, plankMat, floorMat, crateMat });
@@ -1411,7 +1524,9 @@ function buildMap(map){
 function buildDustTunnelRoof(tr){
   const w = tr.xRange[1]-tr.xRange[0], d = tr.zRange[1]-tr.zRange[0];
   const cx = (tr.xRange[0]+tr.xRange[1])/2, cz = (tr.zRange[0]+tr.zRange[1])/2;
-  const roofMat = new THREE.MeshStandardMaterial({ color:0x6b5d47, roughness:0.95 });
+  // optional per-map override (DUST's tunnel below) - defaults to the
+  // original dark timber tone for anything that doesn't set one (OASIS)
+  const roofMat = new THREE.MeshStandardMaterial({ color:tr.color || 0x6b5d47, roughness:0.95 });
   const roof = new THREE.Mesh(new THREE.PlaneGeometry(w,d), roofMat);
   roof.rotation.x = Math.PI/2;
   roof.position.set(cx, tr.y, cz);
@@ -1434,33 +1549,38 @@ function buildDustTunnelRoof(tr){
 // band right where a standing player's body is) and can't see through while
 // crouched (below the sill).
 const HOUSE_WALL_T = 0.5, HOUSE_DOOR_GAP = 2.2, HOUSE_WIN_GAP = 2.0, HOUSE_WIN_SILL = 1.4, HOUSE_WIN_OPEN = 1.2;
-function buildHouse(x, z, w, d, wallMat, roofMat, doorSide){
+// baseY raises the whole house (walls/windows/roof) onto a stilt platform -
+// see buildHouseOnStilts below. Every Y position here is baseY-relative so
+// a baseY of 0 (the default, used by every ground-level house) reproduces
+// the exact original geometry.
+function buildHouse(x, z, w, d, wallMat, roofMat, doorSide, baseY){
+  baseY = baseY || 0;
   const h = WALL_H, hw = w/2, hd = d/2, T = HOUSE_WALL_T;
 
   function nsWall(cz, len, gapMode){ // runs along X, thickness in Z
-    if(!gapMode){ addBlock(x, h/2, cz, len, h, T, wallMat); return; }
+    if(!gapMode){ addBlock(x, baseY+h/2, cz, len, h, T, wallMat); return; }
     const gapLen = gapMode==='door' ? HOUSE_DOOR_GAP : HOUSE_WIN_GAP;
     const stub = (len-gapLen)/2;
-    if(stub <= 0.3){ addBlock(x, h/2, cz, len, h, T, wallMat); return; }
-    addBlock(x-(len-stub)/2, h/2, cz, stub, h, T, wallMat);
-    addBlock(x+(len-stub)/2, h/2, cz, stub, h, T, wallMat);
+    if(stub <= 0.3){ addBlock(x, baseY+h/2, cz, len, h, T, wallMat); return; }
+    addBlock(x-(len-stub)/2, baseY+h/2, cz, stub, h, T, wallMat);
+    addBlock(x+(len-stub)/2, baseY+h/2, cz, stub, h, T, wallMat);
     if(gapMode==='window'){
-      addBlock(x, HOUSE_WIN_SILL/2, cz, gapLen, HOUSE_WIN_SILL, T, wallMat);
+      addBlock(x, baseY+HOUSE_WIN_SILL/2, cz, gapLen, HOUSE_WIN_SILL, T, wallMat);
       const headerH = h-HOUSE_WIN_SILL-HOUSE_WIN_OPEN;
-      if(headerH>0.1) addBlock(x, h-headerH/2, cz, gapLen, headerH, T, wallMat);
+      if(headerH>0.1) addBlock(x, baseY+h-headerH/2, cz, gapLen, headerH, T, wallMat);
     }
   }
   function ewWall(cx, len, gapMode){ // runs along Z, thickness in X
-    if(!gapMode){ addBlock(cx, h/2, z, T, h, len, wallMat); return; }
+    if(!gapMode){ addBlock(cx, baseY+h/2, z, T, h, len, wallMat); return; }
     const gapLen = gapMode==='door' ? HOUSE_DOOR_GAP : HOUSE_WIN_GAP;
     const stub = (len-gapLen)/2;
-    if(stub <= 0.3){ addBlock(cx, h/2, z, T, h, len, wallMat); return; }
-    addBlock(cx, h/2, z-(len-stub)/2, T, h, stub, wallMat);
-    addBlock(cx, h/2, z+(len-stub)/2, T, h, stub, wallMat);
+    if(stub <= 0.3){ addBlock(cx, baseY+h/2, z, T, h, len, wallMat); return; }
+    addBlock(cx, baseY+h/2, z-(len-stub)/2, T, h, stub, wallMat);
+    addBlock(cx, baseY+h/2, z+(len-stub)/2, T, h, stub, wallMat);
     if(gapMode==='window'){
-      addBlock(cx, HOUSE_WIN_SILL/2, z, T, HOUSE_WIN_SILL, gapLen, wallMat);
+      addBlock(cx, baseY+HOUSE_WIN_SILL/2, z, T, HOUSE_WIN_SILL, gapLen, wallMat);
       const headerH = h-HOUSE_WIN_SILL-HOUSE_WIN_OPEN;
-      if(headerH>0.1) addBlock(cx, h-headerH/2, z, T, headerH, gapLen, wallMat);
+      if(headerH>0.1) addBlock(cx, baseY+h-headerH/2, z, T, headerH, gapLen, wallMat);
     }
   }
 
@@ -1470,9 +1590,56 @@ function buildHouse(x, z, w, d, wallMat, roofMat, doorSide){
   ewWall(x+hw, d, doorSide==='e' ? 'door' : 'window');
 
   const roof = new THREE.Mesh(new THREE.BoxGeometry(w+0.4, 0.3, d+0.4), roofMat);
-  roof.position.set(x, h+0.15, z);
+  roof.position.set(x, baseY+h+0.15, z);
   roof.castShadow = true; roof.receiveShadow = true;
   mapGroup.add(roof);
+}
+
+// a house raised on stilts, walkable underneath: four corner support posts
+// (thin enough not to really block passage), a thin floor slab at
+// stiltHeight (registered as a height region so standing on it works, but
+// only 0.2 units thick so the whole stiltHeight of open air below it stays
+// walkable - unlike a normal raised platform, which is built as a full
+// solid pedestal down to the ground on purpose), the same buildHouse walls/
+// windows/roof sitting on top of that floor, and a stair up to the door.
+function buildHouseOnStilts(x, z, w, d, wallMat, roofMat, doorSide, stiltHeight){
+  const hw = w/2, hd = d/2, post = 0.35;
+  [[-hw+0.35,-hd+0.35],[hw-0.35,-hd+0.35],[-hw+0.35,hd-0.35],[hw-0.35,hd-0.35]].forEach(([ox,oz])=>{
+    addBlock(x+ox, stiltHeight/2, z+oz, post, stiltHeight, post, wallMat);
+  });
+  // the solid floor slab is inset 0.6 from the wall footprint on every
+  // side (collision only - the height region below still reports the full,
+  // unshrunk footprint). Without the inset, the slab's own player-radius-
+  // widened collision blocks the last stretch of approach up the stairs
+  // before the ramp region's height (which only reaches this platform's
+  // exact target right at the true wall edge, not early - the usual
+  // RAMP_BUFFER early-arrival trick only helps the ramp's *far* end, and
+  // the near-wall end is unavoidably the near end for a south/east-facing
+  // stair) ever gets there - a real deadlock found by direct movement
+  // testing (the player got stuck a fraction of a unit short of the door,
+  // floor unreachable), not by eye. Once past the true wall edge on foot
+  // (immediately inside the door), the ramp's own formula already clamps
+  // to the full target height for any point beyond it, so there's no gap
+  // between "ramp says you've arrived" and "solid floor begins".
+  addBlock(x, stiltHeight-0.1, z, w-1.2, 0.2, d-1.2, wallMat);
+  // restricted (see groundHeightAt): unlike every other platform in the
+  // game, this one is walkable underneath, not a solid pedestal - so it
+  // must NOT unconditionally report its height to anyone whose feet are
+  // still down at ground level, or simply walking under it would smoothly
+  // (and nonsensically) float them straight up onto the floor above. Only
+  // unlocks once the stairs have already eased the caller's eye height to
+  // within reach of it.
+  heightRegions.push({ kind:'platform', x0:x-hw, x1:x+hw, z0:z-hd, z1:z+hd, y:stiltHeight,
+    restricted:true, restrictedEyeThreshold: stiltHeight + EYE_STAND - 1.2 });
+
+  buildHouse(x, z, w, d, wallMat, roofMat, doorSide, stiltHeight);
+
+  // stairway up to the door, planted just outside whichever wall has it
+  const stairLen = stiltHeight + 1.5;
+  if(doorSide==='n') addStairs(x, z-hd-stairLen/2, 3, stairLen, 'z', 0, stiltHeight, wallMat, 8);
+  else if(doorSide==='s') addStairs(x, z+hd+stairLen/2, 3, stairLen, 'z', stiltHeight, 0, wallMat, 8);
+  else if(doorSide==='w') addStairs(x-hw-stairLen/2, z, 3, stairLen, 'x', 0, stiltHeight, wallMat, 8);
+  else addStairs(x+hw+stairLen/2, z, 3, stairLen, 'x', stiltHeight, 0, wallMat, 8);
 }
 
 // a lintel bar over a doorway/chokepoint gap, purely decorative, so it
@@ -1580,6 +1747,7 @@ function updatePlayerMovement(dt){
   crouchAmount += ((crouching?1:0) - crouchAmount) * Math.min(1, dt*8);
 
   let speed = scoped ? WEAPONS.SNIPER.scope.moveSpeed : (crouching ? 2.1 : (sprinting ? 6.4 : 3.8));
+  speed *= currentWeapon.speedMult || 1; // the knife's whole trade-off is speed for firepower
   const sin = Math.sin(yaw), cos = Math.cos(yaw);
   // forward vector for yaw=0 looking toward -Z
   const moveX = (-sin*forward + cos*strafe);
@@ -1604,12 +1772,12 @@ function updatePlayerMovement(dt){
   // or onto one no matter how high you could jump. Walls/platforms are all
   // WALL_H (4 units) or taller, far beyond the jump's ~1-unit reach, so this
   // only ever matters for something actually low enough to clear.
-  const footY = groundHeightAt(yawObject.position.x, yawObject.position.z);
+  const footY = groundHeightAt(yawObject.position.x, yawObject.position.z, groundFollowY);
   const res = collideAndSlide(yawObject.position, dx, dz, footY + jumpOffset);
   yawObject.position.x = res.x;
   yawObject.position.z = res.z;
 
-  const groundY = groundHeightAt(yawObject.position.x, yawObject.position.z);
+  const groundY = groundHeightAt(yawObject.position.x, yawObject.position.z, groundFollowY);
   const targetEyeY = groundY + (crouching?EYE_CROUCH:EYE_STAND);
   groundFollowY += (targetEyeY - groundFollowY) * Math.min(1, dt*10);
 
@@ -1947,17 +2115,24 @@ function updateAmmoHUD(){
 // its copy too.
 const pickups = [];
 const pickupGeo = new THREE.BoxGeometry(0.32, 0.1, 0.12);
+const stimGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.3, 8);
+const STIM_HEAL = 40;
 let pickupIdCounter = 0;
-function spawnPickup(x, z, weaponType, id, fromNet){
+// kind defaults to 'weapon' (a killed enemy's gun) - see damageEnemy for
+// the ~1/3-of-kills chance of a 'stim' consumable dropping alongside it
+function spawnPickup(x, z, weaponType, id, fromNet, kind){
+  kind = kind || 'weapon';
   if(id==null) id = 'pk'+(pickupIdCounter++);
-  const mat = new THREE.MeshStandardMaterial({ color: WEAPONS[weaponType].color, roughness:0.4, metalness:0.5, emissive:0x1a1206, emissiveIntensity:0.4 });
-  const mesh = new THREE.Mesh(pickupGeo, mat);
+  const mat = kind==='stim'
+    ? new THREE.MeshStandardMaterial({ color:0x4fd67a, roughness:0.3, metalness:0.3, emissive:0x1c5c33, emissiveIntensity:0.6 })
+    : new THREE.MeshStandardMaterial({ color: WEAPONS[weaponType].color, roughness:0.4, metalness:0.5, emissive:0x1a1206, emissiveIntensity:0.4 });
+  const mesh = new THREE.Mesh(kind==='stim' ? stimGeo : pickupGeo, mat);
   mesh.position.set(x, 0.42, z);
   mesh.rotation.y = Math.random()*Math.PI;
   mesh.castShadow = true;
   scene.add(mesh);
-  pickups.push({ id, mesh, weaponType, bobPhase: Math.random()*10 });
-  if(!fromNet && net.role==='host' && net.mode==='coop') netSend({ t:'pickupSpawn', id, x, z, weaponType });
+  pickups.push({ id, mesh, weaponType, kind, bobPhase: Math.random()*10 });
+  if(!fromNet && net.role==='host' && net.mode==='coop') netSend({ t:'pickupSpawn', id, x, z, weaponType, kind });
 }
 function disposePickup(p){
   scene.remove(p.mesh);
@@ -1981,7 +2156,22 @@ function updatePickups(dt){
     p.mesh.rotation.y += dt*1.4;
     const dx = p.mesh.position.x-yawObject.position.x, dz = p.mesh.position.z-yawObject.position.z;
     if(Math.hypot(dx,dz) < PICKUP_RADIUS){
-      equipWeapon(p.weaponType);
+      if(p.kind==='stim'){
+        if(net.role==='guest' && net.mode==='coop'){
+          // guestHealth is host-authoritative (see netDamageGuest) - apply
+          // this locally too and the very next host health sync would just
+          // stomp it back down, silently undoing the heal. Ask the host to
+          // apply it instead and let the normal guestHealth broadcast (see
+          // 'guestHeal' below) bring the healed value back, same as every
+          // other guest health change already works.
+          netSend({ t:'guestHeal', amount:STIM_HEAL });
+        } else {
+          playerHealth = Math.min(TARGET_HEALTH, playerHealth + STIM_HEAL);
+          updateHealthHUD();
+        }
+      } else {
+        equipWeapon(p.weaponType);
+      }
       playReloadSound();
       if(net.mode==='coop' && net.connected) netSend({ t:'pickupTaken', id:p.id });
       disposePickup(p);
@@ -2031,8 +2221,8 @@ function buildEnemy(t, weaponType){
   // as a long rifle, a pistol as a stub, a shotgun as thick and short -
   // and the barrel tip (muzzle flash/light) scales proportionally so it
   // stays at the end of the barrel regardless of length
-  const gunLen = weaponType==='SNIPER' ? 0.85 : weaponType==='SHOTGUN' ? 0.62 : weaponType==='PISTOL' ? 0.32 : weaponType==='SMG' ? 0.42 : 0.55;
-  const gunThick = weaponType==='SHOTGUN' ? 0.14 : weaponType==='SNIPER' ? 0.09 : 0.1;
+  const gunLen = weaponType==='SNIPER' ? 0.85 : weaponType==='SHOTGUN' ? 0.62 : weaponType==='PISTOL' ? 0.32 : weaponType==='SMG' ? 0.42 : weaponType==='MINIGUN' ? 0.7 : weaponType==='KNIFE' ? 0.16 : 0.55;
+  const gunThick = weaponType==='SHOTGUN' ? 0.14 : weaponType==='SNIPER' ? 0.09 : weaponType==='MINIGUN' ? 0.16 : weaponType==='KNIFE' ? 0.045 : 0.1;
   const gunMesh = new THREE.Mesh(new THREE.BoxGeometry(gunThick,gunThick,gunLen), new THREE.MeshStandardMaterial({color:WEAPONS[weaponType].color, roughness:0.4, metalness:0.6}));
   gunMesh.position.set(0.02, -0.4, -0.4*gunLen);
   armR.pivot.add(gunMesh);
@@ -2093,12 +2283,19 @@ function buildEnemy(t, weaponType){
 
 // animates the limb pivots each frame: a walk-cycle swing while the enemy
 // is actually travelling, and a raised aiming pose once alert/fighting
-function animateEnemyPose(en, dt, isMoving){
+function animateEnemyPose(en, dt, isMoving, crouching){
   if(isMoving) en.walkPhase += dt * 8;
   const swing = isMoving ? Math.sin(en.walkPhase) * 0.55 : 0;
   const settle = Math.min(1, dt*8);
-  en.legL.pivot.rotation.x += (swing - en.legL.pivot.rotation.x) * settle;
-  en.legR.pivot.rotation.x += (-swing - en.legR.pivot.rotation.x) * settle;
+  // a real crouch bends both knees forward (layered under whatever walk
+  // swing is happening) and leans the torso forward slightly, rather than
+  // just sinking the whole rigid model into the floor at its normal
+  // standing pose - crouching is only ever passed for the multiplayer
+  // remote avatar (bots never crouch, so every other call site omits it
+  // and gets the exact original standing/walking pose)
+  const crouchBend = crouching ? 0.32 : 0;
+  en.legL.pivot.rotation.x += (swing + crouchBend - en.legL.pivot.rotation.x) * settle;
+  en.legR.pivot.rotation.x += (-swing + crouchBend - en.legR.pivot.rotation.x) * settle;
 
   const aiming = (en.state==='ALERT' || en.state==='COMBAT');
   const armSwing = isMoving ? -swing*0.5 : 0;
@@ -2113,7 +2310,7 @@ function animateEnemyPose(en, dt, isMoving){
   // a slight backward snap through the torso reads as the shooter absorbing
   // the shot, on top of the arm/gun recoil - subtle, so rapid fire doesn't
   // look like a seizure
-  const torsoTarget = en.recoilTimer>0 ? -0.06 : 0;
+  const torsoTarget = (en.recoilTimer>0 ? -0.06 : 0) + (crouching ? 0.16 : 0);
   en.bodyMesh.rotation.x += (torsoTarget - en.bodyMesh.rotation.x) * recoilSettle;
 
   // the gun itself kicks straight back along its barrel and snaps home -
@@ -2189,6 +2386,11 @@ function damageEnemy(enemy, amount, byGuest){
     enemy.group.rotation.z = Math.PI/2.1;
     enemy.group.position.y = 0.05;
     spawnPickup(enemy.group.position.x, enemy.group.position.z, enemy.weapon);
+    // about 1/3 of kills also drop a stim, offset a bit so it doesn't sit
+    // exactly on top of the weapon drop
+    if(Math.random() < 1/3){
+      spawnPickup(enemy.group.position.x+0.6, enemy.group.position.z+0.4, null, null, false, 'stim');
+    }
     updateEnemyCountHUD();
     if(net.mode==='coop'){ if(byGuest) net.guestKills++; else net.hostKills++; netSendStats(); }
     checkRoundClear();
@@ -2658,13 +2860,19 @@ function onNetMessage(msg){
       if(net.role==='host'){ const en = enemies[msg.i]; if(en) damageEnemy(en, msg.dmg, true); }
       break;
     case 'guestHealth': netApplyGuestHealth(msg.health); break; // host -> guest, co-op
+    case 'guestHeal':                                           // guest -> host, co-op
+      if(net.role==='host'){
+        net.guestHealth = Math.min(TARGET_HEALTH, net.guestHealth + msg.amount);
+        netSend({ t:'guestHealth', health:net.guestHealth });
+      }
+      break;
     case 'stats':                                             // host -> guest, co-op
       net.hostKills=msg.hostKills; net.guestKills=msg.guestKills;
       net.hostDeaths=msg.hostDeaths; net.guestDeaths=msg.guestDeaths;
       updateScoreboard();
       break;
     case 'pickupSpawn':                                         // host -> guest, co-op
-      if(net.role==='guest') spawnPickup(msg.x, msg.z, msg.weaponType, msg.id, true);
+      if(net.role==='guest') spawnPickup(msg.x, msg.z, msg.weaponType, msg.id, true, msg.kind);
       break;
     case 'pickupTaken': removePickupById(msg.id); break;        // co-op, either direction - whoever didn't grab it locally removes their copy
     case 'squadDown': netApplySquadDown(); break;               // host -> guest, co-op
@@ -2870,7 +3078,7 @@ function updateRemoteAvatar(dt){
   }
   if(av.hitFlashTimer>0){ av.hitFlashTimer -= dt; av.bodyMesh.material.color.setHex(0xffffff); }
   const moving = dist2D(av.group.position, [net.remote.x, net.remote.z]) > 0.02;
-  animateEnemyPose(av, dt, moving);
+  animateEnemyPose(av, dt, moving, net.remote.crouch);
 }
 
 // ---- per-frame networking tick, called from the main animate() loop ----
@@ -2962,7 +3170,25 @@ const minimapCtx = minimapCanvas.getContext('2d');
 let minimapWalls = []; // cached per-map: [{x0,z0,x1,z1}, ...] in world space
 let minimapScale = 1;
 function cacheMinimapGeometry(){
-  minimapWalls = wallBoxes.map(b => ({ x0:b.min.x, z0:b.min.z, x1:b.max.x, z1:b.max.z }));
+  // a house's own wall stubs/window sills/headers are a dozen-plus tiny
+  // overlapping wallBoxes (one clean building to the player, but drawn
+  // naively that's a dozen-plus tiny strokeRects piled on each other at
+  // minimap scale - at a few pixels each they don't read as separate lines,
+  // they read as one solid smear). Skip any wallBox that belongs to a house
+  // and draw one clean footprint outline per house instead.
+  const houses = activeMap.houses || [];
+  function houseAt(cx, cz){
+    return houses.find(h => Math.abs(cx-h.x) <= h.w/2+0.4 && Math.abs(cz-h.z) <= h.d/2+0.4);
+  }
+  minimapWalls = [];
+  wallBoxes.forEach(b=>{
+    const cx=(b.min.x+b.max.x)/2, cz=(b.min.z+b.max.z)/2;
+    if(houseAt(cx,cz)) return;
+    minimapWalls.push({ x0:b.min.x, z0:b.min.z, x1:b.max.x, z1:b.max.z });
+  });
+  houses.forEach(h=>{
+    minimapWalls.push({ x0:h.x-h.w/2, z0:h.z-h.d/2, x1:h.x+h.w/2, z1:h.z+h.d/2 });
+  });
   const clamp = (activeMap && activeMap.clamp) || {x:21.3, z:16.3};
   const size = minimapCanvas.width; // square canvas
   minimapScale = size / (2 * Math.max(clamp.x, clamp.z) + 4);
