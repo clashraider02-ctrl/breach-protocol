@@ -284,6 +284,10 @@
       <span class="mapCardName">RUINS</span>
       <span class="mapCardDesc">Destroyed city block. Broken wall stubs and rubble piles carve up the open ground.</span>
     </button>
+    <button class="mapCard" data-map="8" style="--swatch:#6b7278">
+      <span class="mapCardName">CARRIER</span>
+      <span class="mapCardDesc">Aircraft carrier flight deck. Parked planes line one flank, the island looms on the other.</span>
+    </button>
   </div>
   <p class="mapSelectHint">Rotates through the remaining maps every 5 rounds</p>
 </div>
@@ -1575,6 +1579,59 @@ const MAPS = [
       { pos:[-20,-10],patrol:[[-20,-10],[-23,-6],[-17,-6]] },
     ],
     houses: [ { x:20, z:-4, w:8, d:6, door:'s' } ],
+  },
+  {
+    // aircraft carrier flight deck - a long narrow map like CARGO, but with
+    // parked "aircraft" (solid, non-jumpable blocks) lining the west flank
+    // and a solid, non-enterable island superstructure on the east flank
+    // instead of a symmetric layout. Two real bugs caught by validation
+    // before shipping: the flank enemies' patrol points sat exactly on the
+    // aircraft block centers (same mistake as CARGO's first draft - fixed
+    // by moving the patrol lane outside the block footprint), and a
+    // decorative stairs+platform lookout on the island was placed on the
+    // side facing AWAY from spawn, so the ramp assist (which only helps
+    // the far/t=1 end - see RAMP_BUFFER) never engaged on the approach
+    // side and the player hit a sheer cliff face; moving the stairs to
+    // face spawn fixed the ramp itself, but the platform's own solid
+    // collision still deadlocked the approach a bit short (the same class
+    // of bug fixed for the stilts house's floor collision), so - since
+    // this was purely decorative - the lookout was cut rather than chase
+    // a third placement fix. Final layout (spawn, spawn2, every enemy
+    // pos/patrol point, every crate) verified reachable from spawn via the
+    // real movement/collision code.
+    name: 'CARRIER',
+    outdoor: true,
+    floorSize: [36, 100],
+    clamp: { x:17, z:48 },
+    spawn: [0, 42],
+    spawn2: [0, -42],
+    tint: { wall:0x4a5561, wall2:0x38414c, floor:0x494f54, crate:0x6b7278, ceil:0xaebfc9,
+      indoorWall:0x565f68, indoorFloor:0x3d4247 },
+    outerWalls: [
+      [-17, 0, 0.6, 100],
+      [17, 0, 0.6, 100],
+      [0, 50, 34, 0.6],
+      [0, -50, 34, 0.6],
+    ],
+    partitions: [],
+    crates: [[-4,30],[4,30],[-4,-30],[4,-30],[-4,10],[4,-10],[6,25],[-6,-25]],
+    enemyTemplates: [
+      { pos:[-8.5,-15], patrol:[[-8.5,-15],[-8.5,-5],[-8.5,5]] },
+      { pos:[-8.5,15],  patrol:[[-8.5,15],[-8.5,25],[-8.5,35]] },
+      { pos:[0,0],      patrol:[[0,0],[0,-12],[0,12]] },
+      { pos:[7,-20],    patrol:[[7,-20],[7,-10],[7,0]] },
+      { pos:[7,20],     patrol:[[7,20],[7,10],[7,0]] },
+    ],
+    // parked aircraft (2.2 tall - above the ~1.7 unit jump apex, so unlike
+    // crates these aren't standable-on) line the west flank; the island
+    // superstructure on the east flank is a solid, non-enterable block
+    buildVerticality({ crateMat, mat2 }){
+      const rowZ = [-30,-15,0,15,30];
+      rowZ.forEach(cz=>{
+        addBlock(-11, 1.1, cz, 3, 2.2, 5, crateMat);
+      });
+      addBlock(12, 2.5, 0, 6, 5, 10, mat2);
+    },
   },
 ];
 
