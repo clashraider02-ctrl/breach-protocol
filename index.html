@@ -1129,6 +1129,20 @@ const MAPS = [
     spawn: [0, 12],
     spawn2: [-3, -15], // second player/PvP spawn - the north pocket, clear of every crate/patrol/wall
     ceilHeight: 7.5,
+    // slightly bigger than the shared 44x34 footprint (see FACILITY) - the
+    // boundary alone moved outward, every interior partition/crate/enemy/
+    // mezzanine coordinate below is untouched. Diffed the full wallBoxes
+    // set against the original footprint to confirm: only the 5 boundary
+    // wall segments differ, nothing interior changed at all.
+    floorSize: [50, 39],
+    clamp: { x:24.3, z:18.8 },
+    outerWalls: [
+      [0, -19.5, 50, 0.6],
+      [-25, 0, 0.6, 39],
+      [25, 0, 0.6, 39],
+      [-16, 19.5, 18, 0.6],
+      [16, 19.5, 18, 0.6],
+    ],
     tint: { wall:0x54524c, wall2:0x484a4d, floor:0x35322c, crate:0x6b5230, ceil:0x201f1d,
       indoorWall:0x6b5a48, indoorFloor:0x584a3a },
     partitions: [
@@ -1176,6 +1190,18 @@ const MAPS = [
     spawn: [0, 12],
     spawn2: [3, -15],
     ceilHeight: 7.5,
+    // slightly bigger than the shared 44x34 footprint - see the matching
+    // note on SANDSTONE. Same boundary-only change, same diff-verified
+    // result: nothing interior moved.
+    floorSize: [50, 39],
+    clamp: { x:24.3, z:18.8 },
+    outerWalls: [
+      [0, -19.5, 50, 0.6],
+      [-25, 0, 0.6, 39],
+      [25, 0, 0.6, 39],
+      [-16, 19.5, 18, 0.6],
+      [16, 19.5, 18, 0.6],
+    ],
     tint: { wall:0x3d4650, wall2:0x333a42, floor:0x24272b, crate:0x4a4f38, ceil:0x15171a,
       indoorWall:0x454e52, indoorWall2:0x565f63, indoorFloor:0x2c3134 },
     partitions: [
