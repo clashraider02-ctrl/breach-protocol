@@ -1298,6 +1298,152 @@ function addCrateCover(x, z, hex){
   return mesh;
 }
 
+let sandbagTexture = null;
+function getSandbagTexture(){
+  if(!sandbagTexture){
+    const c = document.createElement('canvas'); c.width=128; c.height=128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgb(150,138,104)';
+    ctx.fillRect(0,0,c.width,c.height);
+    const bagH = 30;
+    for(let y=0; y<c.height; y+=bagH){
+      // each row is 2 bulging bags side by side - drawn as overlapping
+      // radial gradients so the row reads as lumpy sacks, not a flat plank
+      [c.width*0.27, c.width*0.77].forEach(bx=>{
+        const rg = ctx.createRadialGradient(bx, y+bagH*0.45, 4, bx, y+bagH*0.45, c.width*0.36);
+        const n = 130+Math.random()*30;
+        rg.addColorStop(0, `rgb(${(n+14)|0},${(n+4)|0},${(n-18)|0})`);
+        rg.addColorStop(1, `rgb(${(n-20)|0},${(n-24)|0},${(n-40)|0})`);
+        ctx.fillStyle = rg;
+        ctx.fillRect(0, y, c.width, bagH-3);
+      });
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(0, y+bagH-3, c.width, 3);
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(c.width*0.5, y+2); ctx.lineTo(c.width*0.5, y+bagH-5); ctx.stroke();
+    }
+    sandbagTexture = new THREE.CanvasTexture(c);
+    sandbagTexture.wrapS = sandbagTexture.wrapT = THREE.RepeatWrapping;
+    sandbagTexture.encoding = THREE.sRGBEncoding;
+  }
+  return sandbagTexture;
+}
+// a lower, squatter cover option (0.55 vs the crate's 0.72) - same
+// collision box + height-region registration pattern as addCrateCover, so
+// it drops in as a straight substitute for any [x,z] crate entry
+function addSandbagCover(x, z){
+  const w=1.1, d=1.1, h=0.55;
+  const mat = new THREE.MeshStandardMaterial({ map:getSandbagTexture(), roughness:0.95 });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  mesh.position.set(x, h/2, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mapGroup.add(mesh);
+  wallBoxes.push(new THREE.Box3().setFromObject(mesh));
+  raycastMeshes.push(mesh);
+  heightRegions.push({ kind:'platform', x0:x-w/2, x1:x+w/2, z0:z-d/2, z1:z+d/2, y:h });
+  return mesh;
+}
+
+let barrierTexture = null;
+function getBarrierTexture(){
+  if(!barrierTexture){
+    const c = document.createElement('canvas'); c.width=128; c.height=128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgb(168,166,158)';
+    ctx.fillRect(0,0,c.width,c.height);
+    for(let i=0;i<160;i++){
+      const x=Math.random()*c.width, y=Math.random()*c.height;
+      const n = 150+Math.random()*40;
+      ctx.fillStyle = `rgba(${n|0},${n|0},${(n-6)|0},${0.1+Math.random()*0.2})`;
+      ctx.fillRect(x,y,2+Math.random()*3,2+Math.random()*3);
+    }
+    // a diagonal hazard stripe band near the top, like a real Jersey barrier
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, c.height*0.08, c.width, c.height*0.16);
+    ctx.clip();
+    ctx.fillStyle = 'rgb(168,166,158)';
+    ctx.fillRect(0, c.height*0.08, c.width, c.height*0.16);
+    ctx.fillStyle = 'rgba(200,150,20,0.85)';
+    for(let x=-c.height; x<c.width+c.height; x+=18){
+      ctx.beginPath();
+      ctx.moveTo(x,0); ctx.lineTo(x+10,0); ctx.lineTo(x+10-c.height,c.height); ctx.lineTo(x-c.height,c.height);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fillRect(0, c.height*0.08-2, c.width, 2);
+    ctx.fillRect(0, c.height*0.24, c.width, 2);
+    barrierTexture = new THREE.CanvasTexture(c);
+    barrierTexture.wrapS = barrierTexture.wrapT = THREE.RepeatWrapping;
+    barrierTexture.encoding = THREE.sRGBEncoding;
+  }
+  return barrierTexture;
+}
+// a taller concrete-barrier cover option (0.9 vs the crate's 0.72), same
+// registration pattern as addCrateCover/addSandbagCover
+function addBarrierCover(x, z){
+  const w=1.1, d=1.1, h=0.9;
+  const mat = new THREE.MeshStandardMaterial({ map:getBarrierTexture(), roughness:0.9 });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  mesh.position.set(x, h/2, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mapGroup.add(mesh);
+  wallBoxes.push(new THREE.Box3().setFromObject(mesh));
+  raycastMeshes.push(mesh);
+  heightRegions.push({ kind:'platform', x0:x-w/2, x1:x+w/2, z0:z-d/2, z1:z+d/2, y:h });
+  return mesh;
+}
+
+// a standalone rubble-pile cover piece (reuses the boundary rubble
+// texture) - a rotated, randomly-sized chunk instead of a uniform box, for
+// a destroyed-city setting where even the cover should look broken
+function addRubblePileCover(x, z){
+  const w=1.2, d=1.2, h=0.6+Math.random()*0.3;
+  const mat = new THREE.MeshStandardMaterial({ map:getRubbleTexture(), roughness:0.95 });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  mesh.position.set(x, h/2, z);
+  mesh.rotation.y = (Math.random()-0.5)*0.4;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mapGroup.add(mesh);
+  wallBoxes.push(new THREE.Box3().setFromObject(mesh));
+  raycastMeshes.push(mesh);
+  heightRegions.push({ kind:'platform', x0:x-w/2, x1:x+w/2, z0:z-d/2, z1:z+d/2, y:h });
+  return mesh;
+}
+
+let waterTexture = null;
+function getWaterTexture(){
+  if(!waterTexture){
+    const c = document.createElement('canvas'); c.width=256; c.height=256;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createLinearGradient(0,0,0,c.height);
+    grad.addColorStop(0, 'rgb(32,70,92)');
+    grad.addColorStop(1, 'rgb(16,42,58)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,c.width,c.height);
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.lineWidth = 2;
+    for(let i=0;i<50;i++){
+      const y = Math.random()*c.height, x = Math.random()*c.width;
+      const len = 16+Math.random()*36;
+      ctx.beginPath();
+      ctx.moveTo(x,y);
+      ctx.quadraticCurveTo(x+len/2, y+(Math.random()-0.5)*10, x+len, y);
+      ctx.stroke();
+    }
+    waterTexture = new THREE.CanvasTexture(c);
+    waterTexture.wrapS = waterTexture.wrapT = THREE.RepeatWrapping;
+    waterTexture.repeat.set(10, 8);
+    waterTexture.encoding = THREE.sRGBEncoding;
+  }
+  return waterTexture;
+}
+
 // a chain-link boundary fence for outdoor maps, in place of a solid wall -
 // same collision footprint as the wall it replaces (an invisible box at
 // the same bounds, so reachability/clamp behavior is unchanged) but the
@@ -1363,6 +1509,102 @@ function addFence(x, z, w, d){
     post.position.set(px, (FENCE_H+0.15)/2, pz);
     post.castShadow = true;
     mapGroup.add(post);
+  }
+}
+
+// a ship's deck-edge guardrail - 3 open horizontal rails between posts
+// instead of a solid net, so the ocean beyond (see the map.water branch in
+// buildShell) stays clearly visible rather than hazed out behind mesh.
+// Same invisible full-height collider as addFence, so it blocks movement
+// identically even though the visible bars only cover a fraction of that
+// height.
+function addRailing(x, z, w, d){
+  const isLongX = w >= d;
+  const length = isLongX ? w : d;
+
+  const collMat = new THREE.MeshBasicMaterial({ visible:false });
+  const collMesh = new THREE.Mesh(new THREE.BoxGeometry(w, FENCE_H, d), collMat);
+  collMesh.position.set(x, FENCE_H/2, z);
+  mapGroup.add(collMesh);
+  wallBoxes.push(new THREE.Box3().setFromObject(collMesh));
+  raycastMeshes.push(collMesh);
+
+  [0.15, FENCE_H*0.55, FENCE_H*0.95].forEach(ry=>{
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(isLongX?length:0.07, 0.06, isLongX?0.07:length), fencePostMat);
+    rail.position.set(x, ry, z);
+    rail.castShadow = true;
+    mapGroup.add(rail);
+  });
+  const postSpacing = 2.6;
+  const n = Math.max(2, Math.round(length/postSpacing));
+  for(let i=0;i<=n;i++){
+    const t = i/n - 0.5;
+    const px = isLongX ? x + t*length : x;
+    const pz = isLongX ? z : z + t*length;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, FENCE_H, 0.09), fencePostMat);
+    post.position.set(px, FENCE_H/2, pz);
+    post.castShadow = true;
+    mapGroup.add(post);
+  }
+}
+
+let rubbleTexture = null;
+function getRubbleTexture(){
+  if(!rubbleTexture){
+    const c = document.createElement('canvas'); c.width=128; c.height=128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgb(150,146,136)';
+    ctx.fillRect(0,0,c.width,c.height);
+    for(let i=0;i<220;i++){
+      const x=Math.random()*c.width, y=Math.random()*c.height;
+      const n = 100+Math.random()*80;
+      ctx.fillStyle = `rgba(${n|0},${(n-4)|0},${(n-10)|0},${0.12+Math.random()*0.25})`;
+      ctx.fillRect(x,y,2+Math.random()*4,2+Math.random()*4);
+    }
+    ctx.strokeStyle = 'rgba(110,80,55,0.5)';
+    ctx.lineWidth = 2;
+    for(let i=0;i<4;i++){
+      const x = Math.random()*c.width;
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x+(Math.random()-0.5)*20, c.height); ctx.stroke();
+    }
+    rubbleTexture = new THREE.CanvasTexture(c);
+    rubbleTexture.wrapS = rubbleTexture.wrapT = THREE.RepeatWrapping;
+    rubbleTexture.encoding = THREE.sRGBEncoding;
+  }
+  return rubbleTexture;
+}
+// a broken-concrete rubble barrier - irregular chunks of varying height/
+// position along the boundary line instead of a uniform wall or fence,
+// fitting a destroyed-city/ruins setting far better than either. Same
+// invisible full-height collider as addFence/addRailing.
+function addRubbleBarrier(x, z, w, d){
+  const collMat = new THREE.MeshBasicMaterial({ visible:false });
+  const collMesh = new THREE.Mesh(new THREE.BoxGeometry(w, FENCE_H, d), collMat);
+  collMesh.position.set(x, FENCE_H/2, z);
+  mapGroup.add(collMesh);
+  wallBoxes.push(new THREE.Box3().setFromObject(collMesh));
+  raycastMeshes.push(collMesh);
+
+  const isLongX = w >= d;
+  const length = isLongX ? w : d;
+  const thickness = isLongX ? d : w;
+  const rubbleMat = new THREE.MeshStandardMaterial({ map:getRubbleTexture(), roughness:0.95 });
+  const chunkLen = 2.1;
+  const n = Math.max(3, Math.round(length/chunkLen));
+  for(let i=0;i<n;i++){
+    const t = (i+0.5)/n - 0.5;
+    const jitter = (Math.random()-0.5)*thickness*0.4;
+    const cx = isLongX ? x + t*length : x + jitter;
+    const cz = isLongX ? z + jitter : z + t*length;
+    const h = 1.1 + Math.random()*1.3;
+    const cw = chunkLen*0.65 + Math.random()*0.55;
+    const cd = thickness*0.75 + Math.random()*0.3;
+    const chunk = new THREE.Mesh(new THREE.BoxGeometry(cw, h, cd), rubbleMat);
+    chunk.position.set(cx, h/2, cz);
+    chunk.rotation.y = (Math.random()-0.5)*0.35;
+    chunk.castShadow = true;
+    chunk.receiveShadow = true;
+    mapGroup.add(chunk);
   }
 }
 
@@ -1490,14 +1732,39 @@ function buildShell(mat, mat2, floorMat, ceilMat, map){
     const dome = new THREE.Mesh(new THREE.SphereGeometry(170, 24, 16), skyMat);
     mapGroup.add(dome);
 
-    // ground extending past the playable footprint, so a see-through fence
-    // (below) reads as a boundary within a larger space instead of the
-    // player-facing floor just stopping dead at the wall line
-    const outerGround = new THREE.Mesh(new THREE.PlaneGeometry(fw*1.7, fd*1.7), floorMat);
-    outerGround.rotation.x = -Math.PI/2;
-    outerGround.position.y = -0.03;
-    outerGround.receiveShadow = true;
-    mapGroup.add(outerGround);
+    if(map.water){
+      // a ship map: real ocean below the deck line instead of more ground -
+      // a rippled water plane far below, and hull plating dropping from the
+      // deck edge down to the waterline directly under the railing (see
+      // addRailing below) so the ship visibly sits IN the water rather than
+      // floating above an empty gap
+      const waterMat = new THREE.MeshStandardMaterial({
+        map:getWaterTexture(), color:0x2f6e88, roughness:0.3, metalness:0.25, fog:false
+      });
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(fw*3.2, fd*2.2), waterMat);
+      water.rotation.x = -Math.PI/2;
+      water.position.y = -3.6;
+      mapGroup.add(water);
+
+      const hullMat = new THREE.MeshStandardMaterial({ color:map.tint.wall2, map:wallTexture, roughness:0.8, metalness:0.15 });
+      const hullH = 3.6;
+      (map.outerWalls||[]).forEach(([x,z,w,d])=>{
+        const isLongX = w>=d;
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(isLongX?w:0.5, hullH, isLongX?0.5:d), hullMat);
+        hull.position.set(x, -hullH/2, z);
+        hull.castShadow = true;
+        mapGroup.add(hull);
+      });
+    } else {
+      // ground extending past the playable footprint, so a see-through
+      // fence/barrier (below) reads as a boundary within a larger space
+      // instead of the player-facing floor just stopping dead at the wall
+      const outerGround = new THREE.Mesh(new THREE.PlaneGeometry(fw*1.7, fd*1.7), floorMat);
+      outerGround.rotation.x = -Math.PI/2;
+      outerGround.position.y = -0.03;
+      outerGround.receiveShadow = true;
+      mapGroup.add(outerGround);
+    }
   } else {
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(fw,fd), ceilMat);
     ceil.rotation.x = Math.PI/2; ceil.position.y = ceilY;
@@ -1517,12 +1784,21 @@ function buildShell(mat, mat2, floorMat, ceilMat, map){
     // a map with its own footprint/perimeter (e.g. DUST is much bigger
     // than the standard 44x34 arena) supplies its own wall list and skips
     // the shared breach-gap doorframe below - it builds its own entry.
-    // Outdoor maps get a see-through chain-link fence instead of a solid
-    // wall (addFence keeps the exact same collision footprint, just a
-    // shorter and visually permeable boundary) - a real building wall only
-    // makes sense once there's an actual roof over it (indoor maps).
-    if(map.outdoor) map.outerWalls.forEach(([x,z,w,d])=> addFence(x, z, w, d));
-    else map.outerWalls.forEach(([x,z,w,d])=> addBlock(x, ceilY/2, z, w, ceilY, d, mat));
+    // Outdoor maps get a boundary suited to their setting instead of one
+    // solid wall everywhere - all three keep the exact same collision
+    // footprint as the wall they replace, just visually different: a
+    // chain-link fence (default), a ship's guardrail (map.barrierType
+    // 'railing' - see the water branch above), or a broken-rubble barrier
+    // (map.barrierType 'rubble'). A real building wall only makes sense
+    // once there's an actual roof over it (indoor maps).
+    if(map.outdoor){
+      const barrierFn = map.barrierType==='railing' ? addRailing
+        : map.barrierType==='rubble' ? addRubbleBarrier
+        : addFence;
+      map.outerWalls.forEach(([x,z,w,d])=> barrierFn(x, z, w, d));
+    } else {
+      map.outerWalls.forEach(([x,z,w,d])=> addBlock(x, ceilY/2, z, w, ceilY, d, mat));
+    }
     return;
   }
 
@@ -1592,7 +1868,7 @@ const MAPS = [
     // kept clear of every enemy spawn/patrol point below (see fix_conflicts
     // note near FACILITY/VILLA) - a crate sitting exactly on a patrol point
     // used to trap that enemy inside its own cover permanently
-    crates: [[-12.2,-7.6],[-14,4],[-1.2,-0.6],[-1.2,7.4],[3.8,-12.4],[11.8,-1.6],[8.2,11.4],[17.8,5.4],[-17,10],[1.8,11.4]],
+    crates: [[-12.2,-7.6,'barrier'],[-14,4],[-1.2,-0.6],[-1.2,7.4],[3.8,-12.4],[11.8,-1.6,'barrier'],[8.2,11.4],[17.8,5.4],[-17,10],[1.8,11.4]],
     enemyTemplates: [
       { pos:[-14,-9], patrol:[[-14,-9],[-14,-2],[-18,-2],[-18,-9]] },
       { pos:[-3,-2],  patrol:[[-3,-2],[-3,6],[-14,6],[-14,-2]] },
@@ -1650,7 +1926,7 @@ const MAPS = [
     },
     // fix_conflicts.js: nudged off every enemy spawn/patrol point so no
     // enemy spawns trapped inside its own crate's collision box
-    crates: [[15.8,-7.6],[14,4],[4.8,-0.6],[4.8,7.4],[-0.2,-12.4],[-8.2,-1.6],[-8.2,11.4],[-14.2,5.4],[17,10],[1.8,11.4]],
+    crates: [[15.8,-7.6,'barrier'],[14,4],[4.8,-0.6],[4.8,7.4],[-0.2,-12.4],[-8.2,-1.6,'barrier'],[-8.2,11.4],[-14.2,5.4],[17,10],[1.8,11.4]],
     enemyTemplates: [
       { pos:[14,-9],  patrol:[[14,-9],[14,-2],[18,-2],[18,-9]] },
       { pos:[3,-2],   patrol:[[3,-2],[3,6],[14,6],[14,-2]] },
@@ -1754,12 +2030,12 @@ const MAPS = [
       [24,0],                      // Blue
       [30,-10],[24,-14],           // Pit
       [22,-30],[25,-30],           // Car
-      [30,-38],[28,-36],           // Goose / Barrels
+      [30,-38,'sandbag'],[28,-36,'sandbag'], // Goose / Barrels
       [-28,-32],[-22,-36],[-18,-30], // B site boxes
       [-28,-40],                   // Back Plat
       [-18,4],[-18,-6],            // Upper Tunnel cover
       [-28,4],[-28,-6],            // Lower Tunnel cover
-      [4,-24],                     // CT spawn cover
+      [4,-24,'barrier'],           // CT spawn cover
     ],
     enemyTemplates: [
       { pos:[24,-6],   patrol:[[24,-6],[24,4],[28,4],[28,-6]] },          // holding Long
@@ -1838,6 +2114,7 @@ const MAPS = [
     // *footprint*, not a mesh-for-mesh recreation.
     name: 'OASIS',
     outdoor: true,
+    barrierType: 'rubble',
     floorSize: [74, 86],
     clamp: { x:34, z:40 },
     spawn: [-26, 36],
@@ -1957,6 +2234,8 @@ const MAPS = [
     // on the container centers, which is why they're offset here.
     name: 'CARGO',
     outdoor: true,
+    water: true,
+    barrierType: 'railing',
     floorSize: [28, 88],
     clamp: { x:13, z:43 },
     spawn: [0, 36],
@@ -2009,6 +2288,7 @@ const MAPS = [
     // movement/collision code.
     name: 'RUINS',
     outdoor: true,
+    barrierType: 'rubble',
     floorSize: [60, 60],
     clamp: { x:28, z:28 },
     spawn: [0, 24],
@@ -2027,7 +2307,7 @@ const MAPS = [
       [-13, -8, 0.5, 6],
       [13, 8, 0.5, 6],
     ],
-    crates: [[-6,4],[6,4],[-6,-4],[6,-4],[-20,0],[20,6],[3,18],[-3,-18]],
+    crates: [[-6,4,'rubble'],[6,4,'sandbag'],[-6,-4,'rubble'],[6,-4,'sandbag'],[-20,0,'rubble'],[20,6],[3,18,'rubble'],[-3,-18]],
     enemyTemplates: [
       { pos:[-9,3],  patrol:[[-9,3],[-9,-3],[-16,-3]] },
       { pos:[9,-3],  patrol:[[9,-3],[9,3],[16,3]] },
@@ -2036,6 +2316,30 @@ const MAPS = [
       { pos:[-20,-10],patrol:[[-20,-10],[-23,-6],[-17,-6]] },
     ],
     houses: [ { x:20, z:-4, w:8, d:6, door:'s' } ],
+    // small decorative rubble clutter scattered across the open ground -
+    // purely visual (no wallBoxes/heightRegions/raycastMeshes registration
+    // at all), so placement can't affect reachability regardless of where
+    // it lands. Sells the "destroyed city" setting with debris everywhere,
+    // not just at the boundary and the few named cover pieces.
+    buildVerticality(){
+      const rubbleMat = new THREE.MeshStandardMaterial({ map:getRubbleTexture(), roughness:0.95 });
+      const debrisSpots = [
+        [-16,16],[16,-16],[-24,20],[24,-20],[10,20],[-10,-20],
+        [0,-6],[-15,-18],[15,18],[26,12],[-26,-12],[2,-2],
+      ];
+      debrisSpots.forEach(([dx,dz])=>{
+        const n = 2+Math.floor(Math.random()*2);
+        for(let i=0;i<n;i++){
+          const s = 0.3+Math.random()*0.5;
+          const chunk = new THREE.Mesh(new THREE.BoxGeometry(s, s*0.6, s), rubbleMat);
+          chunk.position.set(dx+(Math.random()-0.5)*2.4, s*0.3, dz+(Math.random()-0.5)*2.4);
+          chunk.rotation.y = Math.random()*Math.PI;
+          chunk.castShadow = true;
+          chunk.receiveShadow = true;
+          mapGroup.add(chunk);
+        }
+      });
+    },
   },
   {
     // aircraft carrier flight deck - a long narrow map like CARGO, but with
@@ -2058,6 +2362,8 @@ const MAPS = [
     // real movement/collision code.
     name: 'CARRIER',
     outdoor: true,
+    water: true,
+    barrierType: 'railing',
     floorSize: [36, 100],
     clamp: { x:17, z:48 },
     spawn: [0, 42],
@@ -2113,8 +2419,15 @@ function buildMap(map){
   // detailed wood-plank crates with metal banding/corner brackets, not a
   // flat-textured block - addCrateCover replicates addPlatform's exact
   // collision box + height-region registration, so a player can still jump
-  // up and stand on one exactly as before
-  map.crates.forEach(([x,z])=> addCrateCover(x, z, map.tint.crate));
+  // up and stand on one exactly as before. An optional 3rd array element
+  // picks a different cover type (sandbags, a concrete barrier, a rubble
+  // pile) for variety, using the exact same registration pattern.
+  map.crates.forEach(([x,z,type])=>{
+    if(type==='sandbag') addSandbagCover(x, z);
+    else if(type==='barrier') addBarrierCover(x, z);
+    else if(type==='rubble') addRubblePileCover(x, z);
+    else addCrateCover(x, z, map.tint.crate);
+  });
 
   if(map.tunnelRoof) buildDustTunnelRoof(map.tunnelRoof);
   if(map.doorArches) map.doorArches.forEach(([x,z,w])=> buildArch(x,z,w));
