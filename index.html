@@ -526,6 +526,148 @@ function makePosterTexture(hue){
   return tex;
 }
 
+// corrugated shipping-container side panel - vertical ridge shading (each
+// ridge is a 3-stop gradient: dark/light/dark, faking a rounded bump under
+// flat lighting), a couple of horizontal panel seams, streaked rust bleeding
+// down from the top edge, and a stenciled ID plate - so a container reads as
+// built cargo hardware instead of a flat-colored box
+function makeContainerSideTexture(hex){
+  const c = document.createElement('canvas'); c.width=256; c.height=256;
+  const ctx = c.getContext('2d');
+  const col = new THREE.Color(hex);
+  const base = { r: col.r*255, g: col.g*255, b: col.b*255 };
+  const shade = (f)=> `rgb(${(base.r*f)|0},${(base.g*f)|0},${(base.b*f)|0})`;
+  ctx.fillStyle = shade(0.82);
+  ctx.fillRect(0,0,c.width,c.height);
+  const ridgeW = 16;
+  for(let x=0; x<c.width; x+=ridgeW){
+    const grad = ctx.createLinearGradient(x,0,x+ridgeW,0);
+    grad.addColorStop(0, shade(0.62));
+    grad.addColorStop(0.45, shade(1.12));
+    grad.addColorStop(1, shade(0.62));
+    ctx.fillStyle = grad;
+    ctx.fillRect(x,0,ridgeW,c.height);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.32)';
+  ctx.fillRect(0, c.height*0.06, c.width, 3);
+  ctx.fillRect(0, c.height*0.94, c.width, 3);
+  // rust streaks bleeding down from the top seam
+  for(let i=0;i<5;i++){
+    const sx = Math.random()*c.width;
+    const w = 6 + Math.random()*10;
+    const len = c.height*(0.3+Math.random()*0.5);
+    const grad = ctx.createLinearGradient(0, c.height*0.06, 0, c.height*0.06+len);
+    grad.addColorStop(0, 'rgba(120,60,20,0.55)');
+    grad.addColorStop(1, 'rgba(120,60,20,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(sx, c.height*0.06, w, len);
+  }
+  // stenciled ID plate
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(c.width*0.06, c.height*0.42, c.width*0.34, c.height*0.16);
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  for(let i=0;i<3;i++) ctx.fillRect(c.width*0.09, c.height*(0.46+i*0.045), c.width*0.26, c.height*0.02);
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+
+// the container's door end - twin panels split by a center seam, each with
+// a vertical locking bar and two cam-lock handles, plus corner hinges - the
+// one face on a real container that visibly differs from its corrugated sides
+function makeContainerDoorTexture(hex){
+  const c = document.createElement('canvas'); c.width=256; c.height=256;
+  const ctx = c.getContext('2d');
+  const col = new THREE.Color(hex);
+  const base = { r: col.r*255, g: col.g*255, b: col.b*255 };
+  const shade = (f)=> `rgb(${(base.r*f)|0},${(base.g*f)|0},${(base.b*f)|0})`;
+  ctx.fillStyle = shade(0.78);
+  ctx.fillRect(0,0,c.width,c.height);
+  const ridgeW = 20;
+  for(let x=0; x<c.width; x+=ridgeW){
+    const grad = ctx.createLinearGradient(x,0,x+ridgeW,0);
+    grad.addColorStop(0, shade(0.6));
+    grad.addColorStop(0.45, shade(1.05));
+    grad.addColorStop(1, shade(0.6));
+    ctx.fillStyle = grad;
+    ctx.fillRect(x,0,ridgeW,c.height);
+  }
+  // center seam between the two door panels
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(c.width/2-2, 0, 4, c.height);
+  // a locking bar + two cam-lock handles per panel
+  [c.width*0.28, c.width*0.72].forEach(bx=>{
+    ctx.fillStyle = 'rgba(210,210,205,0.85)';
+    ctx.fillRect(bx-4, c.height*0.1, 8, c.height*0.8);
+    ctx.fillStyle = 'rgba(30,30,28,0.75)';
+    ctx.fillRect(bx-9, c.height*0.28, 18, 10);
+    ctx.fillRect(bx-9, c.height*0.62, 18, 10);
+  });
+  // hinges at the outer top/bottom corners
+  ctx.fillStyle = 'rgba(20,20,20,0.6)';
+  [[c.width*0.06, c.height*0.08],[c.width*0.06, c.height*0.86],
+   [c.width*0.94-14, c.height*0.08],[c.width*0.94-14, c.height*0.86]].forEach(([hx,hy])=>{
+    ctx.fillRect(hx, hy, 14, c.height*0.06);
+  });
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+
+// a sky dome for outdoor maps - a vertical gradient from zenith down through
+// haze to a horizon band, a scatter of soft clouds, and a low silhouette
+// skyline just above the horizon line (reads as distant buildings/terrain)
+// - replaces a flat solid-color backdrop with an actual scene overhead
+function makeSkyTexture(zenithHex, horizonHex, skylineHex){
+  const c = document.createElement('canvas'); c.width=512; c.height=512;
+  const ctx = c.getContext('2d');
+  const zenith = new THREE.Color(zenithHex), horizon = new THREE.Color(horizonHex);
+  const grad = ctx.createLinearGradient(0,0,0,c.height*0.62);
+  grad.addColorStop(0, `rgb(${(zenith.r*255)|0},${(zenith.g*255)|0},${(zenith.b*255)|0})`);
+  grad.addColorStop(1, `rgb(${(horizon.r*255)|0},${(horizon.g*255)|0},${(horizon.b*255)|0})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, c.width, c.height*0.62);
+  // below the horizon line: a haze band fading toward the same tone, so the
+  // dome still looks reasonable if a jump or the mezzanine peeks it from below
+  const groundGrad = ctx.createLinearGradient(0, c.height*0.62, 0, c.height);
+  groundGrad.addColorStop(0, `rgb(${(horizon.r*255)|0},${(horizon.g*255)|0},${(horizon.b*255)|0})`);
+  groundGrad.addColorStop(1, `rgb(${(horizon.r*180)|0},${(horizon.g*180)|0},${(horizon.b*180)|0})`);
+  ctx.fillStyle = groundGrad;
+  ctx.fillRect(0, c.height*0.62, c.width, c.height*0.38);
+  // soft clouds scattered through the upper-middle band
+  for(let i=0;i<14;i++){
+    const cx = Math.random()*c.width, cy = c.height*(0.08+Math.random()*0.4);
+    const rw = 26+Math.random()*46, rh = rw*0.32;
+    const rg = ctx.createRadialGradient(cx,cy,0,cx,cy,rw);
+    rg.addColorStop(0, 'rgba(255,255,255,0.5)');
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.ellipse(cx,cy,rw,rh,0,0,Math.PI*2);
+    ctx.fill();
+  }
+  // low distant skyline right at the horizon, hazier/darker than the
+  // foreground so it reads as far away rather than as nearby geometry
+  const sky = new THREE.Color(skylineHex);
+  ctx.fillStyle = `rgba(${(sky.r*255)|0},${(sky.g*255)|0},${(sky.b*255)|0},0.55)`;
+  let sx = 0;
+  while(sx < c.width){
+    const sw = 14 + Math.random()*34;
+    const sh = 6 + Math.random()*30;
+    ctx.fillRect(sx, c.height*0.62-sh, sw, sh);
+    sx += sw + Math.random()*8;
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+const skyTextureCache = {};
+function getSkyTexture(zenithHex, horizonHex, skylineHex){
+  const key = zenithHex+'|'+horizonHex+'|'+skylineHex;
+  if(!skyTextureCache[key]) skyTextureCache[key] = makeSkyTexture(zenithHex, horizonHex, skylineHex);
+  return skyTextureCache[key];
+}
+
 // house interior dressing - a toilet in the corner farthest from the door
 // (visual only, no collision - small enough that solid geometry there would
 // just be an annoying snag, not real cover) and a procedurally-drawn poster
@@ -973,6 +1115,44 @@ function addBlock(x,y,z,w,h,d,mat,rotY){
   return mesh;
 }
 
+const containerEdgeMat = new THREE.MeshStandardMaterial({ color:0x1c1c1c, roughness:0.65, metalness:0.35 });
+
+// a detailed shipping-container block: corrugated (not flat-colored) side
+// panels, a real door face on the +z end, and raised corner posts at the 4
+// vertical edges - built from addBlock's same collision registration so it
+// drops straight into any spot that used to be a plain crate-material box
+function addContainer(x,y,z,w,h,d,hex){
+  const sideTex = getContainerTextures(hex).side;
+  const doorTex = getContainerTextures(hex).door;
+  const sideMat = new THREE.MeshStandardMaterial({ map:sideTex, roughness:0.8, metalness:0.1 });
+  const doorMat = new THREE.MeshStandardMaterial({ map:doorTex, roughness:0.8, metalness:0.1 });
+  // BoxGeometry face order: px, nx, py, ny, pz, nz - door faces +z
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), [sideMat,sideMat,sideMat,sideMat,doorMat,sideMat]);
+  mesh.position.set(x,y,z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mapGroup.add(mesh);
+  const box = new THREE.Box3().setFromObject(mesh);
+  wallBoxes.push(box);
+  raycastMeshes.push(mesh);
+
+  const postW = Math.min(0.12, w*0.08), postD = Math.min(0.12, d*0.08);
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz])=>{
+    const post = new THREE.Mesh(new THREE.BoxGeometry(postW, h+0.02, postD), containerEdgeMat);
+    post.position.set(x+sx*(w/2-postW/2), y, z+sz*(d/2-postD/2));
+    post.castShadow = true;
+    mapGroup.add(post);
+  });
+  return mesh;
+}
+const containerTextureCache = {};
+function getContainerTextures(hex){
+  if(!containerTextureCache[hex]){
+    containerTextureCache[hex] = { side: makeContainerSideTexture(hex), door: makeContainerDoorTexture(hex) };
+  }
+  return containerTextureCache[hex];
+}
+
 // a raised or sunken walkable surface (rooftop/mezzanine if y>0, a tunnel/
 // basement floor if y<0), registered as a height region so
 // groundHeightAt() reports it as standing height for anyone inside its
@@ -1048,7 +1228,12 @@ function clearMap(){
     const obj = mapGroup.children.pop();
     mapGroup.remove(obj);
     if(obj.geometry) obj.geometry.dispose();
-    if(obj.material) obj.material.dispose();
+    if(obj.material){
+      // a container's mesh has an array of materials (one per box face),
+      // not a single material - arrays have no .dispose() of their own
+      if(Array.isArray(obj.material)) obj.material.forEach(m=>m.dispose());
+      else obj.material.dispose();
+    }
   }
 }
 
@@ -1070,12 +1255,20 @@ function buildShell(mat, mat2, floorMat, ceilMat, map){
   const ceilY = map.ceilHeight || WALL_H;
 
   if(map.outdoor){
-    // an open-sky desert town: the "ceiling" is a bright backdrop set far
-    // overhead so it reads as sky rather than an indoor roof, and there
-    // are no structural beams up there since nothing holds a sky up
-    const sky = new THREE.Mesh(new THREE.PlaneGeometry(fw,fd), ceilMat);
-    sky.rotation.x = Math.PI/2; sky.position.y = 16;
-    mapGroup.add(sky);
+    // a real sky dome instead of a flat-colored backdrop: a gradient from
+    // zenith down through haze to horizon, soft clouds, and a low distant
+    // skyline silhouette - derived from this map's own wall/sky tint so it
+    // stays thematically consistent, wrapped BackSide around the whole
+    // play area. fog:false keeps it crisp even though ground-level fog is
+    // still tuned tight (the fog was never meant to hide the sky, just the
+    // lack of scenery past the walls at ground level).
+    const horizonColor = new THREE.Color(map.tint.ceil);
+    const zenithColor = horizonColor.clone().lerp(new THREE.Color(0x1c3f66), 0.55);
+    const skylineColor = new THREE.Color(map.tint.wall).lerp(new THREE.Color(0x000000), 0.15);
+    const skyTex = getSkyTexture(zenithColor.getHex(), horizonColor.getHex(), skylineColor.getHex());
+    const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog:false, depthWrite:false });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(170, 24, 16), skyMat);
+    mapGroup.add(dome);
   } else {
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(fw,fd), ceilMat);
     ceil.rotation.x = Math.PI/2; ceil.position.y = ceilY;
@@ -1552,13 +1745,17 @@ const MAPS = [
       { pos:[0,20],      patrol:[[0,20],[-6,20],[6,20]] },
     ],
     houses: [ { x:0, z:-36, w:8, d:6, door:'s' } ],
-    // two rows of large solid "container" blocks (2.6 tall - above the ~1.7
-    // unit jump apex, so unlike crates these aren't standable-on)
-    buildVerticality({ crateMat }){
+    // two rows of real shipping containers (2.6 tall - above the ~1.7 unit
+    // jump apex, so unlike crates these aren't standable-on) - corrugated
+    // siding, a real door face, and corner posts via addContainer, cycling
+    // through a small palette of real container colors so the rows don't
+    // read as one repeated block
+    buildVerticality(){
       const rowZ = [-13,-4.5,4,12.5];
+      const hues = [0x8a3226, 0x2f5f7a, 0x3f6b3a, 0xb08a2e];
       [-6.5,6.5].forEach(rowX=>{
-        rowZ.forEach(cz=>{
-          addBlock(rowX, 1.3, cz, 2.6, 2.6, 6, crateMat);
+        rowZ.forEach((cz,i)=>{
+          addContainer(rowX, 1.3, cz, 2.6, 2.6, 6, hues[i % hues.length]);
         });
       });
     },
