@@ -405,8 +405,85 @@ function makeGrainTexture({size=256, cell=1, base=190, variance=45, streak=0}={}
   tex.encoding = THREE.sRGBEncoding; // used as a color .map, not a data map
   return tex;
 }
-const wallTexture  = makeGrainTexture({base:190, variance:34});
-const floorTexture = makeGrainTexture({base:170, variance:50, streak:10});
+// the base wall surface every map's exterior/partition walls are built
+// from (addBlock's default `mat`/`mat2`) - grayscale so a map's own tint
+// still drives the actual color, but built as real paneled/weathered
+// structure (seam grid, beveled panel edges, corner rivets, streak
+// staining) instead of flat grain, since this one texture covers more
+// square footage than anything else in the game
+function makeWallDetailTexture(){
+  const base = makeGrainTexture({base:192, variance:22});
+  const c = base.image;
+  const ctx = c.getContext('2d');
+  const panelW = 64, panelH = 85;
+  for(let y=0; y<c.height; y+=panelH){
+    for(let x=0; x<c.width; x+=panelW){
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
+      ctx.fillRect(x, y, panelW, 2);
+      ctx.fillRect(x, y, 2, panelH);
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(x+2, y+2, panelW-2, 1);
+      ctx.fillRect(x+2, y+2, 1, panelH-2);
+      ctx.fillStyle = 'rgba(20,20,18,0.4)';
+      [[x+4,y+4],[x+panelW-6,y+4],[x+4,y+panelH-6],[x+panelW-6,y+panelH-6]].forEach(([rx,ry])=>{
+        ctx.fillRect(rx, ry, 2, 2);
+      });
+    }
+  }
+  for(let i=0;i<6;i++){
+    const sx = Math.random()*c.width;
+    const len = c.height*(0.25+Math.random()*0.4);
+    const sy = Math.random()*(c.height-len);
+    const grad = ctx.createLinearGradient(0, sy, 0, sy+len);
+    grad.addColorStop(0, 'rgba(30,28,24,0.28)');
+    grad.addColorStop(1, 'rgba(30,28,24,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(sx, sy, 3+Math.random()*4, len);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+// the base floor surface every map uses - a seam grid (expansion joints),
+// a few dark stain blotches, and a couple of hairline cracks instead of
+// plain grain, so open floor space reads as a real built/worn surface
+function makeFloorDetailTexture(){
+  const base = makeGrainTexture({base:170, variance:42, streak:8});
+  const c = base.image;
+  const ctx = c.getContext('2d');
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+  ctx.lineWidth = 2;
+  const seam = 64;
+  for(let x=seam; x<c.width; x+=seam){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,c.height); ctx.stroke(); }
+  for(let y=seam; y<c.height; y+=seam){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(c.width,y); ctx.stroke(); }
+  for(let i=0;i<4;i++){
+    const cx = Math.random()*c.width, cy = Math.random()*c.height;
+    const r = 18+Math.random()*30;
+    const rg = ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+    rg.addColorStop(0, 'rgba(15,14,12,0.22)');
+    rg.addColorStop(1, 'rgba(15,14,12,0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(10,10,9,0.3)';
+  ctx.lineWidth = 1.2;
+  for(let i=0;i<3;i++){
+    let px = Math.random()*c.width, py = Math.random()*c.height;
+    ctx.beginPath(); ctx.moveTo(px,py);
+    for(let s=0;s<5;s++){
+      px += (Math.random()-0.5)*40; py += (Math.random()-0.5)*40;
+      ctx.lineTo(px,py);
+    }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+const wallTexture  = makeWallDetailTexture();
+const floorTexture = makeFloorDetailTexture();
 const crateTexture = makeGrainTexture({base:200, variance:60, streak:26});
 wallTexture.repeat.set(4, 2);
 floorTexture.repeat.set(10, 8);
@@ -2019,7 +2096,7 @@ function buildMap(map){
   const mat  = new THREE.MeshStandardMaterial({ color:map.tint.wall,  map:wallTexture,  roughness:0.88 });
   const mat2 = new THREE.MeshStandardMaterial({ color:map.tint.wall2, map:wallTexture,  roughness:0.85 });
   const floorMat = new THREE.MeshStandardMaterial({ color:map.tint.floor, map:floorTexture, roughness:0.8 });
-  const ceilMat  = new THREE.MeshStandardMaterial({ color:map.tint.ceil,  roughness:1.0 });
+  const ceilMat  = new THREE.MeshStandardMaterial({ color:map.tint.ceil, map:wallTexture, roughness:1.0 });
   const crateMat = new THREE.MeshStandardMaterial({ color:map.tint.crate, map:crateTexture, roughness:0.65 });
   // indoor-room materials - brick/panel walls and tiled/planked floors, so
   // an enclosed interior space (and the new raised platforms/stairs) reads
