@@ -1153,6 +1153,142 @@ function getContainerTextures(hex){
   return containerTextureCache[hex];
 }
 
+// a wooden supply-crate texture: horizontal plank boards with seam lines,
+// two metal banding straps (with rivets) wrapping the crate, and a
+// stenciled stamp - the same "built prop, not a flat block" treatment as
+// the shipping containers, sized for the small cover crates every map uses
+function makeCrateTexture(hex){
+  const c = document.createElement('canvas'); c.width=128; c.height=128;
+  const ctx = c.getContext('2d');
+  const col = new THREE.Color(hex);
+  const base = { r: col.r*255, g: col.g*255, b: col.b*255 };
+  const shade = (f)=> `rgb(${(base.r*f)|0},${(base.g*f)|0},${(base.b*f)|0})`;
+  ctx.fillStyle = shade(0.85);
+  ctx.fillRect(0,0,c.width,c.height);
+  const plankH = 22;
+  for(let y=0; y<c.height; y+=plankH){
+    ctx.fillStyle = shade(0.72+Math.random()*0.28);
+    ctx.fillRect(0, y+1, c.width, plankH-2);
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.fillRect(0, y+plankH-2, c.width, 2);
+  }
+  [c.height*0.28, c.height*0.72].forEach(sy=>{
+    ctx.fillStyle = 'rgba(35,32,26,0.55)';
+    ctx.fillRect(0, sy-5, c.width, 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(0, sy-5, c.width, 2);
+    ctx.fillStyle = 'rgba(20,18,14,0.6)';
+    for(let x=8; x<c.width; x+=20) ctx.fillRect(x-2, sy-2, 4, 4);
+  });
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(c.width*0.1, c.height*0.42, c.width*0.3, c.height*0.14);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  for(let i=0;i<2;i++) ctx.fillRect(c.width*0.13, c.height*(0.45+i*0.06), c.width*0.22, c.height*0.02);
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+const crateDetailTextureCache = {};
+function getCrateTexture(hex){
+  if(!crateDetailTextureCache[hex]) crateDetailTextureCache[hex] = makeCrateTexture(hex);
+  return crateDetailTextureCache[hex];
+}
+
+// the shared cover crate every map places via map.crates - replicates
+// addPlatform's exact collision box + height-region registration (so jump/
+// reachability behavior is provably unchanged from the plain addPlatform
+// call this replaces) but with a detailed wood-crate visual and 4 metal
+// corner brackets instead of one flat-textured block
+function addCrateCover(x, z, hex){
+  const w=1.1, d=1.1, h=CRATE_HEIGHT;
+  const mat = new THREE.MeshStandardMaterial({ map:getCrateTexture(hex), roughness:0.75 });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  mesh.position.set(x, h/2, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mapGroup.add(mesh);
+  const box = new THREE.Box3().setFromObject(mesh);
+  wallBoxes.push(box);
+  raycastMeshes.push(mesh);
+  const bracket = 0.14;
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz])=>{
+    const cp = new THREE.Mesh(new THREE.BoxGeometry(bracket, h*0.92, bracket), containerEdgeMat);
+    cp.position.set(x+sx*(w/2-bracket/2), h/2, z+sz*(d/2-bracket/2));
+    cp.castShadow = true;
+    mapGroup.add(cp);
+  });
+  heightRegions.push({ kind:'platform', x0:x-w/2, x1:x+w/2, z0:z-d/2, z1:z+d/2, y:h });
+  return mesh;
+}
+
+// a chain-link boundary fence for outdoor maps, in place of a solid wall -
+// same collision footprint as the wall it replaces (an invisible box at
+// the same bounds, so reachability/clamp behavior is unchanged) but the
+// visible geometry is a see-through net texture between metal posts and a
+// top rail, so the boundary reads as a fenced-off edge of a larger space
+// rather than the literal edge of the world
+const fencePostMat = new THREE.MeshStandardMaterial({ color:0x2a2c2e, roughness:0.55, metalness:0.5 });
+const FENCE_H = 2.6;
+let fenceTexture = null;
+function getFenceTexture(){
+  if(!fenceTexture){
+    const c = document.createElement('canvas'); c.width=128; c.height=128;
+    const ctx = c.getContext('2d');
+    ctx.strokeStyle = 'rgba(70,74,78,0.9)';
+    ctx.lineWidth = 2.2;
+    const step = 18;
+    for(let x=-c.height; x<c.width+c.height; x+=step){
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x+c.height,c.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x-c.height,c.height); ctx.stroke();
+    }
+    fenceTexture = new THREE.CanvasTexture(c);
+    fenceTexture.wrapS = fenceTexture.wrapT = THREE.RepeatWrapping;
+    fenceTexture.encoding = THREE.sRGBEncoding;
+  }
+  return fenceTexture;
+}
+function addFence(x, z, w, d){
+  const isLongX = w >= d;
+  const length = isLongX ? w : d;
+
+  // invisible collider - identical footprint to the solid wall it replaces
+  // (just shorter, still well above the ~1.7 unit jump apex) so the arena
+  // bounds/clamp/reachability this map was already validated against don't
+  // change at all
+  const collMat = new THREE.MeshBasicMaterial({ visible:false });
+  const collMesh = new THREE.Mesh(new THREE.BoxGeometry(w, FENCE_H, d), collMat);
+  collMesh.position.set(x, FENCE_H/2, z);
+  mapGroup.add(collMesh);
+  wallBoxes.push(new THREE.Box3().setFromObject(collMesh));
+
+  const netTex = getFenceTexture().clone();
+  netTex.needsUpdate = true;
+  netTex.repeat.set(length/2.2, FENCE_H/1.3);
+  extraDisposables.push(netTex);
+  const netMat = new THREE.MeshStandardMaterial({ map:netTex, transparent:true, alphaTest:0.35, side:THREE.DoubleSide, roughness:0.7, metalness:0.4 });
+  const netMesh = new THREE.Mesh(new THREE.BoxGeometry(w, FENCE_H, d), netMat);
+  netMesh.position.set(x, FENCE_H/2, z);
+  mapGroup.add(netMesh);
+  raycastMeshes.push(netMesh);
+
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(isLongX?length:0.1, 0.08, isLongX?0.1:length), fencePostMat);
+  rail.position.set(x, FENCE_H, z);
+  rail.castShadow = true;
+  mapGroup.add(rail);
+
+  const postSpacing = 3;
+  const n = Math.max(2, Math.round(length/postSpacing));
+  for(let i=0;i<=n;i++){
+    const t = i/n - 0.5;
+    const px = isLongX ? x + t*length : x;
+    const pz = isLongX ? z : z + t*length;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.15, FENCE_H+0.15, 0.15), fencePostMat);
+    post.position.set(px, (FENCE_H+0.15)/2, pz);
+    post.castShadow = true;
+    mapGroup.add(post);
+  }
+}
+
 // a raised or sunken walkable surface (rooftop/mezzanine if y>0, a tunnel/
 // basement floor if y<0), registered as a height region so
 // groundHeightAt() reports it as standing height for anyone inside its
@@ -1220,10 +1356,17 @@ function addStairs(x, z, w, len, axis, y0, y1, mat, steps){
   heightRegions.push({ kind:'ramp', axis, x0:x0, x1:x1, z0:z0, z1:z1, y0, y1 });
 }
 
+// per-instance-cloned textures (e.g. each fence segment's net texture needs
+// its own .repeat, so it can't share the one module-level base texture) -
+// tracked here so clearMap can dispose them instead of leaking a fresh
+// CanvasTexture every time a map with a fence is (re)loaded
+const extraDisposables = [];
 function clearMap(){
   wallBoxes.length = 0;
   raycastMeshes.length = 0;
   heightRegions.length = 0;
+  extraDisposables.forEach(t=>t.dispose());
+  extraDisposables.length = 0;
   while(mapGroup.children.length){
     const obj = mapGroup.children.pop();
     mapGroup.remove(obj);
@@ -1269,6 +1412,15 @@ function buildShell(mat, mat2, floorMat, ceilMat, map){
     const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog:false, depthWrite:false });
     const dome = new THREE.Mesh(new THREE.SphereGeometry(170, 24, 16), skyMat);
     mapGroup.add(dome);
+
+    // ground extending past the playable footprint, so a see-through fence
+    // (below) reads as a boundary within a larger space instead of the
+    // player-facing floor just stopping dead at the wall line
+    const outerGround = new THREE.Mesh(new THREE.PlaneGeometry(fw*1.7, fd*1.7), floorMat);
+    outerGround.rotation.x = -Math.PI/2;
+    outerGround.position.y = -0.03;
+    outerGround.receiveShadow = true;
+    mapGroup.add(outerGround);
   } else {
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(fw,fd), ceilMat);
     ceil.rotation.x = Math.PI/2; ceil.position.y = ceilY;
@@ -1287,8 +1439,13 @@ function buildShell(mat, mat2, floorMat, ceilMat, map){
   if(map.outerWalls){
     // a map with its own footprint/perimeter (e.g. DUST is much bigger
     // than the standard 44x34 arena) supplies its own wall list and skips
-    // the shared breach-gap doorframe below - it builds its own entry
-    map.outerWalls.forEach(([x,z,w,d])=> addBlock(x, ceilY/2, z, w, ceilY, d, mat));
+    // the shared breach-gap doorframe below - it builds its own entry.
+    // Outdoor maps get a see-through chain-link fence instead of a solid
+    // wall (addFence keeps the exact same collision footprint, just a
+    // shorter and visually permeable boundary) - a real building wall only
+    // makes sense once there's an actual roof over it (indoor maps).
+    if(map.outdoor) map.outerWalls.forEach(([x,z,w,d])=> addFence(x, z, w, d));
+    else map.outerWalls.forEach(([x,z,w,d])=> addBlock(x, ceilY/2, z, w, ceilY, d, mat));
     return;
   }
 
@@ -1876,9 +2033,11 @@ function buildMap(map){
 
   buildShell(mat, mat2, floorMat, ceilMat, map);
   map.partitions.forEach(([x,z,w,d,rotY])=> addBlock(x, WALL_H/2, z, w, WALL_H, d, mat2, rotY));
-  // crates are built as mini standable platforms (not a plain solid block)
-  // so a player can actually jump up and stand on one - see CRATE_HEIGHT
-  map.crates.forEach(([x,z])=> addPlatform(x, z, 1.1, 1.1, CRATE_HEIGHT, crateMat));
+  // detailed wood-plank crates with metal banding/corner brackets, not a
+  // flat-textured block - addCrateCover replicates addPlatform's exact
+  // collision box + height-region registration, so a player can still jump
+  // up and stand on one exactly as before
+  map.crates.forEach(([x,z])=> addCrateCover(x, z, map.tint.crate));
 
   if(map.tunnelRoof) buildDustTunnelRoof(map.tunnelRoof);
   if(map.doorArches) map.doorArches.forEach(([x,z,w])=> buildArch(x,z,w));
