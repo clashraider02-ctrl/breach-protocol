@@ -4650,11 +4650,17 @@ function drawMinimap(){
     });
   }
 
-  // local player - a small triangle pointing in the current facing direction
+  // local player - a small triangle pointing in the current facing direction.
+  // Canvas rotate() turns clockwise for a positive angle, but yaw turning
+  // positive turns the player counterclockwise in this map's -Z-is-up
+  // convention (forward vector is (-sin(yaw), -cos(yaw)) - see
+  // updatePlayerMovement) - negate it here or the marker spins the
+  // opposite way from the camera, most obvious while strafing/turning
+  // and watching the minimap at the same time.
   const [px,py] = toPx(yawObject.position.x, yawObject.position.z);
   ctx.save();
   ctx.translate(px, py);
-  ctx.rotate(yaw);
+  ctx.rotate(-yaw);
   ctx.fillStyle = '#e8c468';
   ctx.beginPath();
   ctx.moveTo(0, -6); ctx.lineTo(4, 5); ctx.lineTo(-4, 5);
