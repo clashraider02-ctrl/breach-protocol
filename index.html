@@ -103,6 +103,13 @@
   #dmgFlash{ position:absolute; inset:0; background:radial-gradient(ellipse at center, rgba(194,59,47,0) 40%, rgba(150,40,30,.55) 100%); opacity:0; transition:opacity .1s; }
   #dmgFlash.show{ opacity:1; transition:opacity 0s; }
 
+  /* co-op: shown (non-blocking - the view keeps rendering through a living
+     teammate's eyes) while this player is down but the squad's still
+     fighting. Framed like a letterboxed camera overlay rather than a UI
+     panel, so it reads as "you're watching someone else" at a glance. */
+  #spectateBanner{ position:absolute; top:0; left:0; right:0; text-align:center; padding:10px; background:rgba(6,6,8,.7); border-bottom:1px solid var(--danger-dim); color:var(--caution); font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:3px; pointer-events:none; }
+  #spectateBanner span{ color:var(--text); }
+
   /* lean tilt handled via camera roll, not css */
 
   #overlay{ position:fixed; inset:0; background:rgba(6,6,8,.94); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:20; cursor:pointer; text-align:center; }
@@ -201,6 +208,7 @@
 
   <div id="mpPanel" class="hidden"></div>
   <div id="perfPanel" class="hidden"></div>
+  <div id="spectateBanner" class="hidden">YOU ARE DOWN &mdash; SPECTATING <span id="spectateTarget">YOUR SQUAD</span></div>
 
   <div id="controlsHelp">
     <div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div>
@@ -2841,7 +2849,11 @@ document.getElementById('overlay').addEventListener('click', ()=>{
     if(!playerDead && !roundCleared) engageGame();
     return;
   }
-  if(playerDead){ resetRound(false); return; }
+  // playerDead alone isn't enough to retry anymore - in co-op the host
+  // itself can be down while the squad's still fighting (spectating, no
+  // overlay shown at all), so only squadWiped (or, outside co-op, a plain
+  // solo/pvp death) actually means "the round's over, retry it"
+  if(squadWiped || (net.mode!=='coop' && playerDead)){ resetRound(false); return; }
   if(roundCleared){ roundCleared=false; roundNum++; resetRound(true); return; }
   engageGame();
 });
@@ -3412,6 +3424,24 @@ function hasLineOfSight(fromVec, toVec){
   return hits.length===0;
 }
 
+// co-op host only: true once EVERY connected player - the host included -
+// is down. A single death (host's own, or any one guest's) no longer ends
+// the round by itself; only this does.
+function checkSquadWipe(){
+  if(net.role!=='host' || net.mode!=='coop') return false;
+  if(!playerDead) return false;
+  for(const p of net.players.values()){ if(!p.dead) return false; }
+  return true;
+}
+// host-only: the whole squad just ran out of players - freezes the
+// simulation (same as a solo death always has) and tells every guest
+function declareSquadWipe(){
+  squadWiped = true;
+  document.getElementById('spectateBanner').classList.add('hidden');
+  showOverlay('SQUAD <span>DOWN</span>', 'THE WHOLE SQUAD WAS ELIMINATED', 'CLICK TO RETRY ROUND', false);
+  netSend({t:'squadDown'});
+}
+
 function damagePlayer(amount, fromEnemy){
   if(playerDead) return;
   playerHealth -= amount;
@@ -3425,15 +3455,26 @@ function damagePlayer(amount, fromEnemy){
     playerDead = true;
     if(net.role==='host' && net.mode==='coop'){
       net.hostDeaths++; netSendStats();
-      netSend({t:'squadDown'});
+      // solo's always-fatal-to-the-round death only carries over here if
+      // every connected guest is ALSO already down - otherwise this player
+      // just goes to spectate while the squad keeps fighting (see the
+      // spectate-camera branch in animate())
+      if(checkSquadWipe()) declareSquadWipe();
+      return;
     }
     showOverlay('YOU ARE <span>DOWN</span>', 'ELIMINATED BY HOSTILE FORCE', 'CLICK TO RETRY ROUND', false);
   }
 }
 
 function checkRoundClear(){
-  if(enemies.every(e=>e.state==='DEAD') && !playerDead){
+  // solo/pvp: unchanged, blocked by the local player's own death. Co-op
+  // host: blocked only once the whole squad's down, not just this player -
+  // the survivors can clear a round on their own and revive everyone else
+  // for the next one.
+  const failed = (net.mode==='coop' && net.role==='host') ? checkSquadWipe() : playerDead;
+  if(enemies.every(e=>e.state==='DEAD') && !failed){
     roundCleared = true;
+    document.getElementById('spectateBanner').classList.add('hidden');
     if(net.role==='host' && net.mode==='coop') netSend({t:'squadCleared'});
     showOverlay('AREA <span>CLEARED</span>', 'ALL HOSTILES NEUTRALIZED', 'CLICK TO CONTINUE', false);
   }
@@ -4042,6 +4083,47 @@ function updateCoopAvatars(dt){
   });
 }
 
+// co-op only: while this player is down but the squad's still fighting,
+// find someone else still alive to watch through - prefers the host (the
+// one player everyone can always see, since the bot AI itself only ever
+// runs on the host), falls back to any other living guest.
+function pickSpectateTarget(){
+  if(net.mode!=='coop') return null;
+  if(net.role==='host'){
+    for(const [pid,p] of net.players){ if(!p.dead && p.lastXf) return { pid, xf:p.lastXf }; }
+    return null;
+  }
+  const host = net.players.get('host');
+  if(host && host.lastXf && !host.lastXf.dead) return { pid:'host', xf:host.lastXf };
+  for(const [pid,p] of net.players){ if(pid!=='host' && p.lastXf && !p.lastXf.dead) return { pid, xf:p.lastXf }; }
+  return null;
+}
+function spectateLabel(pid){ return pid==='host' ? 'THE HOST' : 'PLAYER '+pid.slice(1); }
+// hijacks the local camera to mirror a living teammate's transform, frame
+// by frame, while this player is down - lets a downed player watch the
+// fight continue instead of staring at a blank screen until the round
+// either clears or the whole squad goes down. The spectating player's own
+// outgoing 'xf' ends up mirroring the target's position too, which is
+// harmless: every avatar is hidden whenever its xf.dead is true (see
+// updateCoopAvatars), and a dead player is already excluded from
+// pickEnemyTarget by its own health<=0 check, so nothing else ever reads
+// this player's position while they're down.
+function updateSpectateCamera(){
+  const banner = document.getElementById('spectateBanner');
+  gunGroup.visible = false; // no floating ghost gun while watching through someone else's eyes
+  document.getElementById('crosshair').classList.add('hidden');
+  const target = pickSpectateTarget();
+  if(!target){ banner.classList.add('hidden'); return; }
+  banner.classList.remove('hidden');
+  document.getElementById('spectateTarget').textContent = spectateLabel(target.pid);
+  const xf = target.xf;
+  yawObject.position.set(xf.x, xf.y, xf.z);
+  yaw = xf.yaw; pitch = xf.pitch || 0;
+  yawObject.rotation.y = yaw;
+  camera.rotation.set(0,0,camera.rotation.z);
+  camera.rotation.x = pitch;
+}
+
 // ---- co-op: enemy targeting extension (used by updateEnemy/attemptEnemyShot above) ----
 // up to MAX_GUESTS candidate positions plus the host's own - reused scratch
 // vectors instead of allocating one per enemy per re-pick, same reasoning
@@ -4068,13 +4150,11 @@ function pickEnemyTarget(en, eyePos, dt){
   if(!p || !p.lastXf || p.health<=0){ en.targetPid = 'host'; return { pos: yawObject.position, isLocal:true, pid:'host' }; }
   return { pos: _targetScratch[0].set(p.lastXf.x, p.lastXf.y, p.lastXf.z), isLocal:false, pid: en.targetPid, xf: p.lastXf };
 }
-// host-authoritative damage to ONE specific connected guest (pid) - same
-// shared-fate rule as the original 2-player design, just generalized: ANY
-// player going down (host or any guest) pauses the whole squad's
-// simulation until a retry, not just when all are down. That's a
-// deliberate choice to keep the existing, already-tuned co-op feel rather
-// than inventing a new "last one standing" ruleset alongside the player-
-// count increase.
+// host-authoritative damage to ONE specific connected guest (pid). Going
+// down takes that one player out of the fight (they switch to spectating
+// a living teammate, see updateSpectateCamera) rather than ending the
+// round outright - it only actually ends once EVERY connected player,
+// host included, is down (checkSquadWipe/declareSquadWipe).
 function netDamagePlayer(pid, amount){
   const p = net.players.get(pid);
   if(!p || p.health<=0) return;
@@ -4083,11 +4163,7 @@ function netDamagePlayer(pid, amount){
   if(p.health<=0){
     p.dead = true;
     p.deaths++; netSendStats();
-    if(!playerDead && !roundCleared){
-      playerDead = true;
-      showOverlay('SQUAD <span>DOWN</span>', 'A TEAMMATE WAS ELIMINATED', 'CLICK TO RETRY ROUND', false);
-      netSend({t:'squadDown'}); // reaches every other connected guest; the one who just died gets there via their own 'yourHealth' <= 0 instead
-    }
+    if(checkSquadWipe()) declareSquadWipe();
   }
 }
 function netApplyGuestHealth(health){
@@ -4095,17 +4171,21 @@ function netApplyGuestHealth(health){
   updateHealthHUD();
   if(health<=0 && !playerDead){
     playerDead = true;
-    showOverlay('YOU ARE <span>DOWN</span>', 'WAITING FOR HOST TO RETRY', 'STANDBY', false);
+    // no overlay here - stay in spectate mode (see the spectate-camera
+    // branch in animate()) until the host either clears the round or tells
+    // us the whole squad's down (netApplySquadDown)
   }
 }
 function netApplySquadDown(){
-  if(playerDead) return;
-  playerDead = true;
-  showOverlay('SQUAD <span>DOWN</span>', 'YOUR TEAMMATE WAS ELIMINATED', 'STANDBY', false);
+  squadWiped = true;
+  playerDead = true; // covers the (rare) case this arrives before our own 'yourHealth' <= 0 does
+  document.getElementById('spectateBanner').classList.add('hidden');
+  showOverlay('SQUAD <span>DOWN</span>', 'THE WHOLE SQUAD WAS ELIMINATED', 'STANDBY', false);
 }
 function netApplySquadCleared(){
   if(roundCleared) return;
   roundCleared = true;
+  document.getElementById('spectateBanner').classList.add('hidden');
   showOverlay('AREA <span>CLEARED</span>', 'ALL HOSTILES NEUTRALIZED', 'STANDBY', false);
 }
 function netApplyStats(msg){
@@ -4163,7 +4243,8 @@ function netApplyRoundInit(msg){
     net.puppets.set(i, puppet);
   });
   updateEnemyCountHUD();
-  playerDead = false; playerHealth = 100; roundCleared = false;
+  playerDead = false; playerHealth = 100; roundCleared = false; squadWiped = false;
+  document.getElementById('spectateBanner').classList.add('hidden');
   updateHealthHUD();
   equipWeapon(currentWeapon.key); // refill ammo for a new round - the host does this via resetRound()'s equipWeapon() call, but this guest-side round transition never went through that, so ammo/reserve just carried over depleted from whatever they ended the last round with
   const sp = coopGuestSpawnPos();
@@ -4533,6 +4614,12 @@ function checkPerfDowngrade(dt){
 // HUD helpers
 // ---------------------------------------------------------------------------
 let playerHealth = 100, playerDead = false, roundCleared = false;
+// co-op only: true once EVERY connected player (host included) is down -
+// see checkSquadWipe(). A single player dying no longer ends the round by
+// itself; it just takes that one player out of the fight (see the
+// spectate-camera plumbing below) until either the squad clears the round
+// without them or the last player standing also falls.
+let squadWiped = false;
 function updateHealthHUD(){
   document.getElementById('healthBar').style.width = Math.max(0,playerHealth)+'%';
 }
@@ -4549,7 +4636,8 @@ function showOverlay(titleHtml, sub, prompt, showLegend){
 }
 
 function resetRound(nextRound){
-  playerHealth = 100; playerDead = false;
+  playerHealth = 100; playerDead = false; squadWiped = false;
+  document.getElementById('spectateBanner').classList.add('hidden');
   // advancing a round (or starting fresh from map select) bumps the player
   // onto that round's guaranteed weapon; retrying after death just refills
   // and re-arms whatever they were already holding, pickups included
@@ -4673,50 +4761,72 @@ function animate(){
   fpsAccumT += dt; fpsAccumN++;
   if(fpsAccumT >= 0.5){ fps = Math.round(fpsAccumN/fpsAccumT); fpsAccumT = 0; fpsAccumN = 0; }
 
-  if(engaged && !playerDead && !roundCleared){
-    updatePlayerMovement(dt);
+  // "the round is still live" no longer means "I personally am alive" - in
+  // co-op the bot simulation (which only ever runs on the host) has to keep
+  // going even while the host itself is down, as long as at least one
+  // connected guest still is too, so a downed player's own death can't be
+  // what silently freezes everyone else's fight. squadWiped is the one
+  // thing that actually stops it (see checkSquadWipe/declareSquadWipe).
+  // solo/pvp have no squad concept - squadWiped never gets set outside
+  // co-op, so this player's own death still fully ends things exactly as
+  // before (the whole block below skips, bots/pickups freeze, no
+  // spectating - there's no one to spectate anyway)
+  const roundFailed = net.mode==='coop' ? squadWiped : playerDead;
+  const roundLive = engaged && !roundCleared && !roundFailed;
+  if(roundLive){
+    if(!playerDead){
+      gunGroup.visible = true;
+      document.getElementById('crosshair').classList.remove('hidden');
+      updatePlayerMovement(dt);
 
-    camera.rotation.set(0,0,camera.rotation.z); // keep roll (lean), clear stale pitch on camera itself
-    yawObject.rotation.y = yaw;
-    camera.rotation.x = pitch;
+      camera.rotation.set(0,0,camera.rotation.z); // keep roll (lean), clear stale pitch on camera itself
+      yawObject.rotation.y = yaw;
+      camera.rotation.x = pitch;
 
-    fireCooldown -= dt;
-    if(fireCooldown<=0 && !reloading){
-      if(currentWeapon.auto){
-        if(mouseDown) fireWeapon();
-      } else if(mouseDown && semiReady){
-        fireWeapon();
-        semiReady = false;
+      fireCooldown -= dt;
+      if(fireCooldown<=0 && !reloading){
+        if(currentWeapon.auto){
+          if(mouseDown) fireWeapon();
+        } else if(mouseDown && semiReady){
+          fireWeapon();
+          semiReady = false;
+        }
       }
-    }
-    if(reloading){
-      reloadTimer -= dt;
-      if(reloadTimer<=0){
-        const needed = currentWeapon.magSize-ammoInMag;
-        const take = Math.min(needed, ammoReserve);
-        ammoInMag += take; ammoReserve -= take;
-        reloading = false;
-        document.getElementById('reloadLabel').style.visibility='hidden';
-        updateAmmoHUD();
+      if(reloading){
+        reloadTimer -= dt;
+        if(reloadTimer<=0){
+          const needed = currentWeapon.magSize-ammoInMag;
+          const take = Math.min(needed, ammoReserve);
+          ammoInMag += take; ammoReserve -= take;
+          reloading = false;
+          document.getElementById('reloadLabel').style.visibility='hidden';
+          updateAmmoHUD();
+        }
       }
+
+      muzzleLight.intensity *= 0.8;
+      muzzleFlash.material.opacity *= 0.72;
+      gunGroup.position.z += (-0.55 - gunGroup.position.z)*Math.min(1,dt*12);
+      // gun sway based on movement
+      const t = now*0.001;
+      const moving = keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD'];
+      const swayY = moving ? Math.sin(t*(sprinting?12:7))*0.012 : Math.sin(t*1.5)*0.004;
+      gunGroup.position.y += (-0.28+swayY - gunGroup.position.y)*Math.min(1,dt*10);
+
+      document.getElementById('crosshair').classList.toggle('fire', mouseDown && ammoInMag>0);
+      if(pickups.length) updatePickups(dt);
+    } else if(net.mode==='coop'){
+      // down but the squad's still fighting - watch through a living
+      // teammate instead of a blank/frozen screen (see updateSpectateCamera)
+      updateSpectateCamera();
     }
-
-    muzzleLight.intensity *= 0.8;
-    muzzleFlash.material.opacity *= 0.72;
-    gunGroup.position.z += (-0.55 - gunGroup.position.z)*Math.min(1,dt*12);
-    // gun sway based on movement
-    const t = now*0.001;
-    const moving = keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD'];
-    const swayY = moving ? Math.sin(t*(sprinting?12:7))*0.012 : Math.sin(t*1.5)*0.004;
-    gunGroup.position.y += (-0.28+swayY - gunGroup.position.y)*Math.min(1,dt*10);
-
-    document.getElementById('crosshair').classList.toggle('fire', mouseDown && ammoInMag>0);
 
     // co-op guest never runs AI decisions (that's host-authoritative) - its
-    // enemies are dumb transform-followers updated by netTick below instead
+    // enemies are dumb transform-followers updated by netTick below instead.
+    // Runs regardless of whether the HOST itself is currently down, same
+    // reasoning as roundLive above.
     const runsLocalAI = !(net.role==='guest' && net.mode==='coop');
     if(runsLocalAI) enemies.forEach(en=>updateEnemy(en, dt));
-    if(pickups.length) updatePickups(dt);
   }
 
   netTick(dt);
