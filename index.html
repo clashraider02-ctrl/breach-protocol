@@ -1133,6 +1133,61 @@ function playHurt(){
   src.connect(filt); filt.connect(g); g.connect(ctx.destination); src.start();
 }
 
+// low, moody ambient pad for the menu screens (connect/map/weapon select) -
+// a few slowly-detuned oscillators through a soft lowpass, with a slow LFO
+// breathing the filter so it doesn't sit static. Procedural like every
+// other sound here, no external audio file. Runs from the first user
+// gesture (browsers block audio before one) until the match actually
+// starts (see engageGame).
+let menuMusicNodes = null;
+function startMenuMusic(){
+  if(menuMusicNodes) return;
+  const ctx = audio();
+  const master = ctx.createGain();
+  master.gain.value = 0;
+  master.connect(ctx.destination);
+  master.gain.linearRampToValueAtTime(0.09, ctx.currentTime + 2.5);
+
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.value = 420;
+  filt.connect(master);
+
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 0.06;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 140;
+  lfo.connect(lfoGain);
+  lfoGain.connect(filt.frequency);
+  lfo.start();
+
+  // a low root + two slightly-detuned partners (a fifth and an octave) so
+  // it reads as a sustained chord, not one flat tone
+  const oscs = [55, 82.5, 110].map(freq=>{
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = freq;
+    o.connect(filt);
+    o.start();
+    return o;
+  });
+
+  menuMusicNodes = { master, filt, lfo, oscs };
+}
+function stopMenuMusic(){
+  if(!menuMusicNodes) return;
+  const { master, lfo, oscs } = menuMusicNodes;
+  const ctx = audio();
+  master.gain.cancelScheduledValues(ctx.currentTime);
+  master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
+  master.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.8);
+  setTimeout(()=>{
+    oscs.forEach(o=> o.stop());
+    lfo.stop();
+  }, 900);
+  menuMusicNodes = null;
+}
+
 // ---------------------------------------------------------------------------
 // LEVEL GEOMETRY - three rotating maps, one active at a time
 // ---------------------------------------------------------------------------
@@ -2911,6 +2966,7 @@ function fallbackEngage(){
 }
 
 function engageGame(){
+  stopMenuMusic(); // menu's over, the fight has its own audio now
   // best-effort: fullscreen makes pointer lock more likely to be granted
   // in some browsers (Safari gates pointer lock behind it) and removes
   // browser chrome the cursor could otherwise wander into; failure here
@@ -4944,6 +5000,13 @@ function resetRound(nextRound){
 setPlayerGunViewModel(currentWeapon.key); // populate the view-model before the first equipWeapon() call
 updateHealthHUD();
 updateAmmoHUD();
+
+// menu music starts on the very first user gesture anywhere on the page
+// (browsers block audio before one, regardless of which menu element gets
+// clicked first) and runs until engageGame() actually drops the player
+// into a match
+window.addEventListener('pointerdown', startMenuMusic, { once:true });
+window.addEventListener('keydown', startMenuMusic, { once:true });
 
 // connect screen is the actual first screen - solo skips straight to map
 // select same as before; the multiplayer roles route through PeerJS before
