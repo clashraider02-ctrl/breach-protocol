@@ -110,6 +110,14 @@
   #spectateBanner{ position:absolute; top:0; left:0; right:0; text-align:center; padding:10px; background:rgba(6,6,8,.7); border-bottom:1px solid var(--danger-dim); color:var(--caution); font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:3px; pointer-events:none; }
   #spectateBanner span{ color:var(--text); }
 
+  /* PvP kill feed - a short-lived stack of "X eliminated Y" lines, top
+     right, newest at the bottom (standard FPS convention) so a fresh line
+     pushes the older ones up rather than everything reflowing downward */
+  #killFeed{ position:absolute; top:70px; right:16px; display:flex; flex-direction:column; align-items:flex-end; gap:4px; pointer-events:none; }
+  .killFeedEntry{ background:rgba(8,8,10,.78); border:1px solid #3a3a3a; border-left:3px solid var(--danger-dim); padding:6px 10px; color:var(--text); font-family:var(--font-mono); font-size:11.5px; letter-spacing:.5px; white-space:nowrap; animation:killFeedFade 4.5s ease forwards; }
+  .killFeedEntry b{ color:var(--caution); font-weight:700; }
+  @keyframes killFeedFade{ 0%{opacity:0; transform:translateX(12px);} 8%{opacity:1; transform:translateX(0);} 80%{opacity:1;} 100%{opacity:0;} }
+
   /* lean tilt handled via camera roll, not css */
 
   #overlay{ position:fixed; inset:0; background:rgba(6,6,8,.94); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:20; cursor:pointer; text-align:center; }
@@ -217,6 +225,7 @@
   <div id="mpPanel" class="hidden"></div>
   <div id="perfPanel" class="hidden"></div>
   <div id="spectateBanner" class="hidden">YOU ARE DOWN &mdash; SPECTATING <span id="spectateTarget">YOUR SQUAD</span></div>
+  <div id="killFeed"></div>
 
   <div id="controlsHelp">
     <div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div>
@@ -3427,6 +3436,17 @@ function updateEnemyCountHUD(){
 // spot that changes a kill/death/assist count, in both multiplayer modes
 // now. A no-op outside a multiplayer host, so call sites don't need their
 // own mode/role guard.
+// host-only: announces one PvP kill to every connected client (itself
+// included, via the direct local call since netSend never loops back to
+// the sender) - both PvP death paths (the host's own, and a guest's
+// reported via 'pvpDeath') funnel through here
+function netBroadcastKillFeed(killerPid, victimPid){
+  if(net.role!=='host' || !netIsMultiplayer()) return;
+  const killerName = playerDisplayName(killerPid);
+  const victimName = playerDisplayName(victimPid);
+  netSend({ t:'killFeed', killerName, victimName });
+  addKillFeedEntry(killerName, victimName);
+}
 function netSendStats(){
   if(net.role!=='host' || !netIsMultiplayer()) return;
   const guestStats = {};
@@ -3883,6 +3903,23 @@ function playerDisplayName(pid){
   return (p && p.lastXf && p.lastXf.name) || ('PLAYER '+String(pid||'').slice(1));
 }
 
+// PvP kill feed - shown on every connected client (see netBroadcastKillFeed
+// for how the host fans this out). Plain text nodes, not innerHTML, since
+// killer/victim names are peer-supplied.
+const KILL_FEED_MAX = 5;
+function addKillFeedEntry(killerName, victimName){
+  const feed = document.getElementById('killFeed');
+  const el = document.createElement('div');
+  el.className = 'killFeedEntry';
+  const b = document.createElement('b');
+  b.textContent = killerName;
+  el.appendChild(b);
+  el.appendChild(document.createTextNode(' eliminated ' + victimName));
+  feed.appendChild(el);
+  while(feed.children.length > KILL_FEED_MAX) feed.removeChild(feed.firstChild);
+  setTimeout(()=>{ if(el.parentNode) el.parentNode.removeChild(el); }, 4500);
+}
+
 function netIsMultiplayer(){ return net.mode==='coop' || net.mode==='pvp'; }
 
 function setNetStatus(msg, isErr){
@@ -4119,6 +4156,8 @@ function onNetMessage(msg){
     case 'squadDown': netApplySquadDown(); break;               // host -> guest, co-op
     case 'squadCleared': netApplySquadCleared(); break;         // host -> guest, co-op
     case 'hitPlayer': netApplyPvpHit(msg.dmg, msg.fromPid); break; // pvp - addressed to ME specifically (direct from host, or relayed)
+    case 'killFeed': addKillFeedEntry(msg.killerName, msg.victimName); break; // host -> guest, pvp
+
     case 'ping': netSend({t:'pong', ts: msg.ts}); break;
     case 'pong': net.rtt = Math.round(performance.now() - msg.ts); break;
   }
@@ -4174,6 +4213,7 @@ function onGuestMessage(pid, msg){
       if(msg.killerPid==='host') net.hostKills++;
       else { const killer = net.players.get(msg.killerPid); if(killer) killer.kills++; }
       netSendStats();
+      netBroadcastKillFeed(msg.killerPid, pid);
       break;
     }
   }
@@ -4597,6 +4637,7 @@ function netApplyPvpHit(dmg, fromPid){
       net.hostDeaths++;
       if(fromPid && fromPid!=='host'){ const k=net.players.get(fromPid); if(k) k.kills++; }
       netSendStats();
+      netBroadcastKillFeed(fromPid, 'host');
     } else {
       netSend({t:'pvpDeath', killerPid: fromPid});
     }
