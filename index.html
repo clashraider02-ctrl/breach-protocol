@@ -1137,7 +1137,7 @@ const raycastMeshes = []; // meshes the gun / AI LOS raycasts test against - reb
 // is what actually makes multi-level maps possible (see collision changes
 // in boxIsFree/collideAndSlide below).
 const heightRegions = []; // rebuilt per map, checked in order (most specific first)
-const RAMP_BUFFER = 0.6; // > PLAYER_RADIUS*2 - see the comment inside groundHeightAt's ramp branch
+const RAMP_BUFFER = 0.9; // split across both ends (0.45 each) - each half must stay > PLAYER_RADIUS (0.35), see the comment inside groundHeightAt's ramp branch
 function groundHeightAt(x, z, refEyeY){
   for(let i=0;i<heightRegions.length;i++){
     const r = heightRegions[i];
@@ -1169,10 +1169,17 @@ function groundHeightAt(x, z, refEyeY){
     // wedging their collision box under the platform's underside. Caught
     // by direct movement testing (the player got stuck mid-staircase every
     // time), not by eye.
+    // The buffer is split evenly across BOTH ends (not just the y1 end) -
+    // a solid structure can sit at either end depending on which way a
+    // given map's stairs face (most of this game's mezzanines happen to
+    // have their platform on the y1 side, but NUKE's central mezzanine has
+    // it on y0, and got stuck exactly this way approaching from that side
+    // before this was made symmetric).
     const span = r.axis==='x' ? (r.x1-r.x0) : (r.z1-r.z0);
     const raw = r.axis==='x' ? (x-r.x0) : (z-r.z0);
+    const half = RAMP_BUFFER/2;
     const effSpan = Math.max(0.1, span - RAMP_BUFFER);
-    const t = THREE.MathUtils.clamp(raw/effSpan, 0, 1);
+    const t = THREE.MathUtils.clamp((raw-half)/effSpan, 0, 1);
     return r.y0 + (r.y1-r.y0)*t;
   }
   return 0;
@@ -1947,7 +1954,15 @@ const MAPS = [
     // Footprint (stairs x[-13,-8] z[-14,-10], platform x[-21,-13]
     // z[-16,-8]) checked clear of every crate/patrol point below.
     buildVerticality({ panelMat }){
-      addStairs(-10.5, -12, 4, 5, 'x', 0, 3.3, panelMat, 7);
+      // y0/y1 were backwards here (0 at x0=-13, the platform-adjacent
+      // edge, 3.3 at x1=-8, the open side) - the exact same reversed-ramp
+      // bug as NUKE's mezzanine (see the comment there), just without the
+      // extra footprint overlap. Ground height jumped straight from 0 to
+      // 3.3 the instant x crossed -13, wedging the collision box against
+      // the platform's own solid pedestal. Swapped so x0 (platform side)
+      // carries 3.3 and x1 (open side) carries 0, matching SANDSTONE's
+      // mirrored-but-correctly-oriented version of this same mezzanine.
+      addStairs(-10.5, -12, 4, 5, 'x', 3.3, 0, panelMat, 7);
       addPlatform(-17, -12, 8, 8, 3.3, panelMat);
       addBlock(-17, 3.3+1.1, -15.75, 8.5, 2.2, 0.4, panelMat);
       addBlock(-17, 3.3+1.1, -8.25, 8.5, 2.2, 0.4, panelMat);
@@ -2264,10 +2279,27 @@ const MAPS = [
       { x:7,  z:0, w:8, d:6, door:'w' },
     ],
     // a small central mezzanine behind the houses, overlooking the south
-    // end of the map - footprint (stairs x[-2,2] z[-14.5,-10.5], platform
+    // end of the map - footprint (stairs x[-2,2] z[-13.5,-9.5], platform
     // x[-3,3] z[-17.5,-13.5]) checked clear of every crate/patrol point.
     buildVerticality({ plankMat }){
-      addStairs(0, -12.5, 4, 4, 'z', 0, 2.4, plankMat, 6);
+      // The stairs used to be centered at z=-12.5 (span z[-14.5,-10.5]),
+      // which put its z0 edge a full unit INSIDE the platform's own
+      // footprint (platform spans z[-17.5,-13.5]) - the ramp region is
+      // checked before the platform one (see heightRegions), so for that
+      // whole overlapping unit the ramp's own interpolated height governed
+      // instead of the platform's flat 2.4, even though the player was
+      // still standing on the platform's solid pedestal. y0/y1 were also
+      // backwards (0 at the platform-adjacent edge, 2.4 at the open entry
+      // edge) on top of that. Combined, a player walking from the platform
+      // toward the stairs got their reported height wrenched down before
+      // they'd actually left the pedestal, wedging their collision box
+      // against its own still-solid top edge - the "stuck in a wall" bug.
+      // Recentered to z=-11.5 so the ramp's z0 edge lands exactly on the
+      // platform's z1 edge (z=-13.5, no overlap - same touching-edge
+      // convention as SANDSTONE/FACILITY/VILLA/OASIS) and swapped y0/y1 so
+      // the platform-adjacent edge (z0) carries the platform's own height
+      // (2.4) and the open entry edge (z1, toward the houses) is ground (0).
+      addStairs(0, -11.5, 4, 4, 'z', 2.4, 0, plankMat, 6);
       addPlatform(0, -15.5, 6, 4, 2.4, plankMat);
     },
   },
