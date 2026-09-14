@@ -1306,11 +1306,12 @@ function getCrateTexture(hex){
 // reachability behavior is provably unchanged from the plain addPlatform
 // call this replaces) but with a detailed wood-crate visual and 4 metal
 // corner brackets instead of one flat-textured block
-function addCrateCover(x, z, hex){
+function addCrateCover(x, z, hex, baseY){
+  baseY = baseY || 0; // the floor this crate sits on - 0 for ordinary ground level, negative for a sunken floor (e.g. DUST's tunnels)
   const w=1.1, d=1.1, h=CRATE_HEIGHT;
   const mat = new THREE.MeshStandardMaterial({ map:getCrateTexture(hex), roughness:0.75 });
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
-  mesh.position.set(x, h/2, z);
+  mesh.position.set(x, baseY+h/2, z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mapGroup.add(mesh);
@@ -1320,11 +1321,11 @@ function addCrateCover(x, z, hex){
   const bracket = 0.14;
   [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz])=>{
     const cp = new THREE.Mesh(new THREE.BoxGeometry(bracket, h*0.92, bracket), containerEdgeMat);
-    cp.position.set(x+sx*(w/2-bracket/2), h/2, z+sz*(d/2-bracket/2));
+    cp.position.set(x+sx*(w/2-bracket/2), baseY+h/2, z+sz*(d/2-bracket/2));
     cp.castShadow = true;
     mapGroup.add(cp);
   });
-  heightRegions.push({ kind:'platform', x0:x-w/2, x1:x+w/2, z0:z-d/2, z1:z+d/2, y:h });
+  heightRegions.push({ kind:'platform', x0:x-w/2, x1:x+w/2, z0:z-d/2, z1:z+d/2, y:baseY+h });
   return mesh;
 }
 
@@ -2080,9 +2081,15 @@ const MAPS = [
       [30,-38,'sandbag'],[28,-36,'sandbag'], // Goose / Barrels
       [-28,-32],[-22,-36],[-18,-30], // B site boxes
       [-28,-40],                   // Back Plat
-      [-18,4],[-18,-6],            // Upper Tunnel cover
-      [-28,4],[-28,-6],            // Lower Tunnel cover
       [4,-24,'barrier'],           // CT spawn cover
+      // Upper/Lower Tunnel cover used to live here too, but this top-level
+      // list always builds at ground level (y=0) - the tunnel floor is
+      // sunk to -2.2 (see buildVerticality below), so those two crates
+      // ended up floating about 2.2 units above the real floor with their
+      // collision box left at the old absolute height, which is what made
+      // walking into them feel like a random mid-tunnel snag/lurch. Moved
+      // into buildVerticality below with an explicit baseY so they sit
+      // flush with the actual sunken floor.
     ],
     enemyTemplates: [
       { pos:[24,-6],   patrol:[[24,-6],[24,4],[28,4],[28,-6]] },          // holding Long
@@ -2138,6 +2145,13 @@ const MAPS = [
       addStairs(-23, -18, 20, 6, 'z', 0, -2.2, floorMat, 8);  // exit ramp up, before B
       addBlock(-13, -2.2+WALL_H/2, 4, 0.5, WALL_H, 24, mat2); // Upper Tunnels east wall, at sunken height
       addBlock(-23, -2.2+WALL_H/2, -2, 0.5, WALL_H, 20, mat2); // Upper/Lower divider, at sunken height
+      // Upper/Lower Tunnel cover crates - baseY=-2.2 so they actually sit
+      // on the sunken floor instead of floating at ground-level height
+      // (see the note on the old `crates` list entries these replaced)
+      addCrateCover(-18, 4, activeMap.tint.crate, -2.2);
+      addCrateCover(-18, -6, activeMap.tint.crate, -2.2);
+      addCrateCover(-28, 4, activeMap.tint.crate, -2.2);
+      addCrateCover(-28, -6, activeMap.tint.crate, -2.2);
 
       addStairs(27, -13, 6, 6, 'z', 2.0, 0, floorMat, 6);     // A plateau access ramp
       addPlatform(27, -19, 6, 6, 2.0, floorMat);              // A plateau
