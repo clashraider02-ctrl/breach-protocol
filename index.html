@@ -110,6 +110,12 @@
   #spectateBanner{ position:absolute; top:0; left:0; right:0; text-align:center; padding:10px; background:rgba(6,6,8,.7); border-bottom:1px solid var(--danger-dim); color:var(--caution); font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:3px; pointer-events:none; }
   #spectateBanner span{ color:var(--text); }
 
+  /* PvP killcam - same letterboxed-overlay language as the co-op spectate
+     banner, just red-keyed instead of caution-keyed so it reads as "you
+     just died" rather than "you're waiting out the round" */
+  #killCamBanner{ position:absolute; top:0; left:0; right:0; text-align:center; padding:10px; background:rgba(6,6,8,.7); border-bottom:1px solid var(--danger); color:var(--danger); font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:3px; pointer-events:none; }
+  #killCamBanner span{ color:var(--text); }
+
   /* PvP kill feed - a short-lived stack of "X eliminated Y" lines, top
      right, newest at the bottom (standard FPS convention) so a fresh line
      pushes the older ones up rather than everything reflowing downward */
@@ -225,6 +231,7 @@
   <div id="mpPanel" class="hidden"></div>
   <div id="perfPanel" class="hidden"></div>
   <div id="spectateBanner" class="hidden">YOU ARE DOWN &mdash; SPECTATING <span id="spectateTarget">YOUR SQUAD</span></div>
+  <div id="killCamBanner" class="hidden">KILLCAM &mdash; <span id="killCamTarget">OPERATOR</span></div>
   <div id="killFeed"></div>
 
   <div id="controlsHelp">
@@ -4646,14 +4653,59 @@ function netApplyPvpHit(dmg, fromPid){
     // peer-supplied name renders as literal text either way - no escaping
     // needed here (unlike the innerHTML-based scoreboard/lobby roster)
     const killerLabel = (fromPid && fromPid!==net.myPid) ? `KILLED BY ${playerDisplayName(fromPid)}` : 'CHOOSE YOUR LOADOUT';
-    showOverlay('ELIMINATED', killerLabel, 'STANDBY', false, true);
-    // same loadout screen as match start - letting the click there double
-    // as the re-engage gesture means no separate "click to respawn" step
-    setTimeout(()=>{
-      document.getElementById('overlay').classList.add('hidden');
-      document.getElementById('weaponSelectScreen').classList.remove('hidden');
-    }, 1400);
+    // if the killer's transform is already known, watch the next couple
+    // seconds through their eyes (a real killcam) before the elimination
+    // overlay/loadout screen - otherwise (no killer, or their xf hasn't
+    // arrived yet) skip straight to the overlay like before
+    const killer = fromPid && fromPid!==net.myPid ? net.players.get(fromPid) : null;
+    if(killer && killer.lastXf){
+      startKillCam(fromPid, killerLabel);
+    } else {
+      finishPvpDeath(killerLabel);
+    }
   }
+}
+let killCamPid = null, killCamTimer = 0, killCamLabel = '';
+const KILLCAM_DURATION = 2.5;
+function startKillCam(pid, label){
+  killCamPid = pid;
+  killCamTimer = KILLCAM_DURATION;
+  killCamLabel = label;
+  gunGroup.visible = false;
+  document.getElementById('crosshair').classList.add('hidden');
+  document.getElementById('killCamTarget').textContent = playerDisplayName(pid);
+  document.getElementById('killCamBanner').classList.remove('hidden');
+}
+// ticks the killcam while it's active - called unconditionally from
+// animate() (a dead PvP player fails roundLive, so nothing else drives the
+// camera for them otherwise, same reasoning as co-op's updateSpectateCamera)
+function updateKillCam(dt){
+  if(!killCamPid) return;
+  const p = net.players.get(killCamPid);
+  if(p && p.lastXf){
+    const xf = p.lastXf;
+    yawObject.position.set(xf.x, xf.y, xf.z);
+    yaw = xf.yaw; pitch = xf.pitch || 0;
+    yawObject.rotation.y = yaw;
+    camera.rotation.set(0,0,camera.rotation.z);
+    camera.rotation.x = pitch;
+  }
+  killCamTimer -= dt;
+  if(killCamTimer <= 0 || !p){
+    document.getElementById('killCamBanner').classList.add('hidden');
+    const label = killCamLabel;
+    killCamPid = null; killCamLabel = '';
+    finishPvpDeath(label);
+  }
+}
+// same loadout screen as match start - letting the click there double as
+// the re-engage gesture means no separate "click to respawn" step
+function finishPvpDeath(killerLabel){
+  showOverlay('ELIMINATED', killerLabel, 'STANDBY', false, true);
+  setTimeout(()=>{
+    document.getElementById('overlay').classList.add('hidden');
+    document.getElementById('weaponSelectScreen').classList.remove('hidden');
+  }, 1400);
 }
 
 // ---------------------------------------------------------------------------
@@ -5076,6 +5128,7 @@ function animate(){
     if(runsLocalAI) enemies.forEach(en=>updateEnemy(en, dt));
   }
 
+  updateKillCam(dt);
   netTick(dt);
   updateMpHUD();
   checkPerfDowngrade(dt);
