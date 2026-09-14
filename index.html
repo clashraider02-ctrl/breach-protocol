@@ -72,7 +72,7 @@
   #scoreboard{ position:absolute; left:50%; top:80px; transform:translateX(-50%); background:rgba(8,8,10,.88); border:1px solid #3a3a3a; padding:14px 20px; min-width:400px; }
   #scoreboardTitle{ font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:4px; color:var(--caution); text-align:center; margin-bottom:10px; }
   .sbRow{ display:grid; grid-template-columns:1fr 60px 60px 60px 60px; font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); padding:4px 0; text-align:right; }
-  .sbRow span:first-child{ text-align:left; }
+  .sbRow span:first-child{ text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px; }
   .sbHead{ color:var(--text-dim); font-size:10.5px; border-bottom:1px solid #35373a; padding-bottom:6px; margin-bottom:2px; }
 
   /* bottom-right ammo */
@@ -144,6 +144,9 @@
   #connectScreen h1{ color:var(--text); font-family:var(--font-display); font-weight:700; font-size:42px; letter-spacing:8px; margin:0 0 10px; text-wrap:balance; }
   #connectScreen h1 span{ color:var(--danger); }
   #connectScreen > p{ color:var(--text-dim); font-family:var(--font-mono); font-size:12px; letter-spacing:3px; margin:4px 0 28px; }
+  #nameRow{ margin-bottom:22px; }
+  #playerNameInput{ background:#15161a; border:1px solid #454850; color:var(--text); font-family:var(--font-mono); font-size:14px; letter-spacing:2px; text-align:center; text-transform:uppercase; width:220px; padding:10px 8px; }
+  #playerNameInput:focus{ outline:none; border-color:var(--caution); }
   #modeGrid{ display:grid; grid-template-columns:repeat(2, minmax(200px,240px)); gap:14px; }
   .modeCard{ position:relative; padding:16px 18px 14px; background:#15161a; border:1px solid #35373a; border-left:4px solid var(--swatch); cursor:pointer; text-align:left; display:flex; flex-direction:column; gap:6px; font-family:inherit; transition:background .15s, border-color .15s, transform .15s; }
   .modeCard:hover, .modeCard:focus-visible{ background:#1c1e23; border-color:var(--swatch); transform:translateY(-2px); outline:none; }
@@ -160,7 +163,7 @@
   #netStatus{ font-family:var(--font-mono); font-size:11px; letter-spacing:1.5px; color:var(--text-dim); min-height:16px; }
   #netStatus.err{ color:var(--danger); }
   #lobbyRoster{ margin-top:16px; display:flex; flex-direction:column; gap:6px; min-width:220px; }
-  .lobbySlot{ display:flex; align-items:center; gap:10px; padding:7px 12px; background:#15161a; border:1px solid #35373a; border-left:3px solid var(--ok); font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); text-align:left; }
+  .lobbySlot{ display:flex; align-items:center; gap:10px; padding:7px 12px; background:#15161a; border:1px solid #35373a; border-left:3px solid var(--ok); font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .lobbySlot.empty{ border-left-color:#3a3a3a; color:var(--text-dim); }
   #backBtn, #backBtn2{ margin-top:6px; background:none; border:none; color:#5f5c54; font-family:var(--font-mono); font-size:10.5px; letter-spacing:1.5px; cursor:pointer; text-decoration:underline; }
 
@@ -227,6 +230,9 @@
 <div id="connectScreen">
   <h1>BREACH <span>PROTOCOL</span></h1>
   <p>SELECT MODE</p>
+  <div id="nameRow">
+    <input id="playerNameInput" placeholder="YOUR NAME" maxlength="16">
+  </div>
   <div id="modeGrid">
     <button class="modeCard" id="soloBtn" style="--swatch:#7fa88f">
       <span class="modeCardName">SOLO</span>
@@ -3800,6 +3806,19 @@ const net = {
   fireFlag: 0,                 // bumped on every local shot, sent in the transform so the remote side can flash a muzzle/recoil
 };
 
+// player display name - persisted locally, sent in every 'xf' transform so
+// every other connected client can label this player's avatar/scoreboard
+// row/lobby slot without a separate message type
+let myPlayerName = 'OPERATOR';
+try{
+  const savedName = localStorage.getItem('bp_playerName');
+  if(savedName && savedName.trim()) myPlayerName = savedName.trim().slice(0,16).toUpperCase();
+}catch(e){}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
 function netIsMultiplayer(){ return net.mode==='coop' || net.mode==='pvp'; }
 
 function setNetStatus(msg, isErr){
@@ -3975,12 +3994,13 @@ function renderLobbyRoster(){
   el.classList.remove('hidden');
   startBtn.classList.remove('hidden');
   startBtn.disabled = net.lobbyStarted;
-  const rows = ['<div class="lobbySlot">HOST (YOU)</div>'];
+  const rows = [`<div class="lobbySlot">${escapeHtml(myPlayerName)} (YOU)</div>`];
   for(let i=1;i<=MAX_GUESTS;i++){
     const pid = 'p'+i;
-    rows.push(net.conns.has(pid)
-      ? `<div class="lobbySlot">PLAYER ${i} - CONNECTED</div>`
-      : `<div class="lobbySlot empty">PLAYER ${i} - open</div>`);
+    if(!net.conns.has(pid)){ rows.push(`<div class="lobbySlot empty">PLAYER ${i} - open</div>`); continue; }
+    const p = net.players.get(pid);
+    const label = p && p.lastXf && p.lastXf.name ? escapeHtml(p.lastXf.name) : 'PLAYER '+i;
+    rows.push(`<div class="lobbySlot">${label} - CONNECTED</div>`);
   }
   el.innerHTML = rows.join('');
   setNetStatus(net.conns.size>0 ? `${net.conns.size}/${MAX_GUESTS} players connected - start whenever you're ready` : 'Share this code - players can join as they arrive...');
@@ -4110,13 +4130,36 @@ function netOnModeChosen(mode){
 // belongs to so a pvp shot can be attributed to whoever it actually hit
 // (see fireWeapon's targets/hitTotals handling) - co-op never adds these
 // to a shot's target list at all, so the tag is simply unused there.
-function buildCoopAvatar(weaponType, pid){
+// builds the small floating name label shown above a remote player's head -
+// a THREE.Sprite auto-billboards toward the camera, so this needs no
+// per-frame rotation logic of its own, just a position above the avatar
+function buildNameTagSprite(name){
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.font = '700 34px "Rajdhani", sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle = '#e8e6df';
+  ctx.fillText(String(name || 'OPERATOR').slice(0,16), c.width/2, c.height/2+2);
+  const tex = new THREE.CanvasTexture(c);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false, depthWrite:false }));
+  sprite.scale.set(1.1, 0.275, 1);
+  sprite.position.y = 2.05;
+  sprite.renderOrder = 999;
+  sprite.userData.nameTagName = name;
+  return sprite;
+}
+function buildCoopAvatar(weaponType, pid, name){
   const av = buildEnemy({ pos:[0,0], patrol:[[0,0]] }, weaponType || 'PISTOL');
   const tint = net.mode==='pvp' ? 0x8a2e6e : 0x2e6e8a;
   av.bodyMesh.material = av.bodyMesh.material.clone(); av.bodyMesh.material.color.setHex(tint);
   av.state = 'COMBAT'; // always the "gun raised" pose, like an actual player holding their weapon
   av.hitMeshes.forEach(m=>{ m.userData.isRemoteAvatar = true; m.userData.ownerPid = pid; });
   av._lastFireFlag = 0;
+  av.nameTag = buildNameTagSprite(name);
+  av.group.add(av.nameTag);
   return av;
 }
 // applies one remote player's transform - on a guest this could be the
@@ -4145,8 +4188,15 @@ function updateCoopAvatars(dt){
   net.players.forEach((p, pid)=>{
     const xf = p.lastXf;
     if(!xf) return;
-    if(!p.avatar) p.avatar = buildCoopAvatar(xf.weapon, pid);
+    if(!p.avatar) p.avatar = buildCoopAvatar(xf.weapon, pid, xf.name);
     const av = p.avatar;
+    if(xf.name && av.nameTag && av.nameTag.userData.nameTagName !== xf.name){
+      const fresh = buildNameTagSprite(xf.name);
+      av.group.remove(av.nameTag);
+      av.nameTag.material.map.dispose(); av.nameTag.material.dispose();
+      av.nameTag = fresh;
+      av.group.add(av.nameTag);
+    }
     av.group.visible = !xf.dead;
     av.group.position.x += (xf.x-av.group.position.x)*Math.min(1,dt*14);
     av.group.position.z += (xf.z-av.group.position.z)*Math.min(1,dt*14);
@@ -4181,7 +4231,11 @@ function pickSpectateTarget(){
   for(const [pid,p] of net.players){ if(pid!=='host' && p.lastXf && !p.lastXf.dead) return { pid, xf:p.lastXf }; }
   return null;
 }
-function spectateLabel(pid){ return pid==='host' ? 'THE HOST' : 'PLAYER '+pid.slice(1); }
+function spectateLabel(pid){
+  const p = net.players.get(pid);
+  if(p && p.lastXf && p.lastXf.name) return p.lastXf.name;
+  return pid==='host' ? 'THE HOST' : 'PLAYER '+pid.slice(1);
+}
 // hijacks the local camera to mirror a living teammate's transform, frame
 // by frame, while this player is down - lets a downed player watch the
 // fight continue instead of staring at a blank screen until the round
@@ -4403,7 +4457,7 @@ function netTick(dt){
       t:'xf', pid: net.myPid, x:yawObject.position.x, y:yawObject.position.y, z:yawObject.position.z,
       yaw, pitch, crouch:crouching, lean:leanAmount, sprinting, scoped,
       weapon: currentWeapon.key, health: playerHealth, dead: playerDead,
-      fireFlag: net.fireFlag,
+      fireFlag: net.fireFlag, name: myPlayerName,
     });
   }
   if(net.role==='host' && net.mode==='coop'){
@@ -4620,16 +4674,20 @@ function updateScoreboard(){
   // either role reads the same way. PvP just never earns assists (no
   // multi-hit credit tracked between players), so that column stays 0.
   const kd = s => s.deaths>0 ? (s.kills/s.deaths).toFixed(1) : s.kills.toFixed(1);
-  const row = (label, s)=> `<div class="sbRow"><span>${label}</span><span>${s.kills}</span><span>${s.deaths}</span><span>${s.assists}</span><span>${kd(s)}</span></div>`;
+  const row = (label, s)=> `<div class="sbRow"><span>${escapeHtml(label)}</span><span>${s.kills}</span><span>${s.deaths}</span><span>${s.assists}</span><span>${kd(s)}</span></div>`;
   const hostStats = { kills:net.hostKills, deaths:net.hostDeaths, assists:net.hostAssists };
+  const hostP = net.players.get('host');
+  const hostName = net.role==='host' ? myPlayerName : (hostP && hostP.lastXf && hostP.lastXf.name) || 'HOST';
   const rows = [];
-  rows.push(row(net.role==='host' ? 'HOST (YOU)' : 'HOST', hostStats));
+  rows.push(row(net.role==='host' ? hostName+' (YOU)' : hostName, hostStats));
   for(let i=1;i<=MAX_GUESTS;i++){
     const pid = 'p'+i;
     if(pid===net.myPid){
-      rows.push(row('YOU', net.players.get(pid) || {kills:0,deaths:0,assists:0}));
+      rows.push(row(myPlayerName+' (YOU)', net.players.get(pid) || {kills:0,deaths:0,assists:0}));
     } else if(net.players.has(pid)){
-      rows.push(row('PLAYER '+i, net.players.get(pid)));
+      const p = net.players.get(pid);
+      const label = (p.lastXf && p.lastXf.name) || ('PLAYER '+i);
+      rows.push(row(label, p));
     }
   }
   rowsEl.innerHTML = rows.join('');
@@ -4728,6 +4786,14 @@ updateAmmoHUD();
 // select same as before; the multiplayer roles route through PeerJS before
 // ever reaching map select (guests never see it at all - only the host
 // picks the map, see below)
+const playerNameInput = document.getElementById('playerNameInput');
+playerNameInput.value = myPlayerName;
+playerNameInput.addEventListener('input', ()=>{
+  const v = playerNameInput.value.trim().slice(0,16).toUpperCase();
+  myPlayerName = v.length ? v : 'OPERATOR';
+  try{ localStorage.setItem('bp_playerName', myPlayerName); }catch(e){}
+});
+
 document.getElementById('soloBtn').addEventListener('click', ()=>{
   net.mode = 'solo'; net.role = null;
   document.getElementById('connectScreen').classList.add('hidden');
