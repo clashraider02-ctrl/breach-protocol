@@ -147,6 +147,9 @@
   #roomCodeDisplay{ font-family:var(--font-mono); font-size:38px; font-weight:700; letter-spacing:10px; color:var(--caution); }
   #netStatus{ font-family:var(--font-mono); font-size:11px; letter-spacing:1.5px; color:var(--text-dim); min-height:16px; }
   #netStatus.err{ color:var(--danger); }
+  #lobbyRoster{ margin-top:16px; display:flex; flex-direction:column; gap:6px; min-width:220px; }
+  .lobbySlot{ display:flex; align-items:center; gap:10px; padding:7px 12px; background:#15161a; border:1px solid #35373a; border-left:3px solid var(--ok); font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); text-align:left; }
+  .lobbySlot.empty{ border-left-color:#3a3a3a; color:var(--text-dim); }
   #backBtn, #backBtn2{ margin-top:6px; background:none; border:none; color:#5f5c54; font-family:var(--font-mono); font-size:10.5px; letter-spacing:1.5px; cursor:pointer; text-decoration:underline; }
 
   @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
@@ -181,8 +184,7 @@
   <div id="scoreboard" class="hidden">
     <div id="scoreboardTitle">SCOREBOARD</div>
     <div class="sbRow sbHead"><span>PLAYER</span><span>KILLS</span><span>DEATHS</span><span>ASSISTS</span></div>
-    <div class="sbRow"><span>YOU</span><span id="sbYouK">0</span><span id="sbYouD">0</span><span id="sbYouA">0</span></div>
-    <div class="sbRow"><span id="sbThemLabel">THEM</span><span id="sbThemK">0</span><span id="sbThemD">0</span><span id="sbThemA">0</span></div>
+    <div id="sbRows"></div>
   </div>
 
   <div id="ammoPanel">
@@ -219,7 +221,7 @@
     </button>
     <button class="modeCard" id="coopBtn" style="--swatch:#5b8f7a">
       <span class="modeCardName">HOST CO-OP</span>
-      <span class="modeCardDesc">Host a 2-player squad vs bots. You pick the map.</span>
+      <span class="modeCardDesc">Host a squad of up to 5 vs bots. You pick the map.</span>
     </button>
     <button class="modeCard" id="pvpBtn" style="--swatch:#c23b2f">
       <span class="modeCardName">HOST PVP</span>
@@ -241,9 +243,11 @@
   </div>
 
   <div id="hostWaitPanel" class="hidden" style="margin-top:20px;">
-    <p style="margin:0 0 8px;">ROOM CODE - SHARE WITH YOUR FRIEND</p>
+    <p style="margin:0 0 8px;" id="hostWaitTitle">ROOM CODE - SHARE WITH YOUR FRIEND</p>
     <div id="roomCodeDisplay">-----</div>
     <div id="netStatus2" class="netStatus" style="font-family:var(--font-mono); font-size:11px; letter-spacing:1.5px; color:var(--text-dim); margin-top:10px;">Waiting for player to join...</div>
+    <div id="lobbyRoster" class="hidden"></div>
+    <button class="netBtn hidden" id="startCoopBtn" style="margin-top:14px;">START MATCH</button>
     <button id="backBtn2">&larr; cancel</button>
   </div>
 </div>
@@ -3084,12 +3088,12 @@ function updatePickups(dt){
     if(Math.hypot(dx,dz) < PICKUP_RADIUS){
       if(p.kind==='stim'){
         if(net.role==='guest' && net.mode==='coop'){
-          // guestHealth is host-authoritative (see netDamageGuest) - apply
-          // this locally too and the very next host health sync would just
-          // stomp it back down, silently undoing the heal. Ask the host to
-          // apply it instead and let the normal guestHealth broadcast (see
-          // 'guestHeal' below) bring the healed value back, same as every
-          // other guest health change already works.
+          // this guest's health is host-authoritative (see netDamagePlayer)
+          // - apply this locally too and the very next host health sync
+          // would just stomp it back down, silently undoing the heal. Ask
+          // the host to apply it instead and let the normal 'yourHealth'
+          // reply bring the healed value back, same as every other health
+          // change already works.
           netSend({ t:'guestHeal', amount:STIM_HEAL });
         } else {
           playerHealth = Math.min(TARGET_HEALTH, playerHealth + STIM_HEAL);
@@ -3285,7 +3289,7 @@ function spawnRound(){
   updateEnemyCountHUD();
 
   if(net.role==='host' && net.mode==='coop'){
-    net.guestHealth = 100;
+    net.players.forEach(p=>{ p.health = 100; p.dead = false; });
     netSend({ t:'roundInit', mapIndex: currentMapIndex, roundNum, enemyWeapons: enemies.map(en=>en.weapon) });
   }
 }
@@ -3295,23 +3299,29 @@ function updateEnemyCountHUD(){
   document.getElementById('enemyCount').textContent = 'HOSTILES: '+alive;
 }
 
-// broadcasts the co-op scoreboard to the guest - called from every spot
-// that changes hostKills/guestKills/hostDeaths/guestDeaths. A no-op outside
-// co-op host, so call sites don't need their own mode/role guard.
+// broadcasts the co-op scoreboard to every connected guest - called from
+// every spot that changes a kill/death/assist count. A no-op outside co-op
+// host, so call sites don't need their own mode/role guard.
 function netSendStats(){
   if(net.role!=='host' || net.mode!=='coop') return;
-  netSend({ t:'stats', hostKills:net.hostKills, guestKills:net.guestKills, hostDeaths:net.hostDeaths, guestDeaths:net.guestDeaths,
-    hostAssists:net.hostAssists, guestAssists:net.guestAssists });
+  const guestStats = {};
+  net.players.forEach((p, pid)=>{ guestStats[pid] = { kills:p.kills, deaths:p.deaths, assists:p.assists }; });
+  netSend({ t:'stats', hostKills:net.hostKills, hostDeaths:net.hostDeaths, hostAssists:net.hostAssists, guestStats });
   updateScoreboard();
 }
-function damageEnemy(enemy, amount, byGuest){
+// byPid: omitted/undefined when the HOST's own shot did it; a guest's pid
+// string when that guest reported the hit (see onGuestMessage's 'hitEnemy')
+function damageEnemy(enemy, amount, byPid){
   if(enemy.state==='DEAD') return;
   enemy.health -= amount;
   enemy.hitFlashTimer = 0.15;
   // remember who has landed a hit on this specific enemy, so whoever
   // *doesn't* get the kill still earns an assist if they contributed -
   // cleared per-enemy naturally since each enemy object only ever dies once
-  if(net.mode==='coop'){ if(byGuest) enemy._dmgByGuest = true; else enemy._dmgByHost = true; }
+  if(net.mode==='coop'){
+    if(byPid){ (enemy._dmgByPids || (enemy._dmgByPids = new Set())).add(byPid); }
+    else enemy._dmgByHost = true;
+  }
   if(enemy.health<=0){
     enemy.state='DEAD';
     enemy.group.rotation.z = Math.PI/2.1;
@@ -3324,8 +3334,20 @@ function damageEnemy(enemy, amount, byGuest){
     }
     updateEnemyCountHUD();
     if(net.mode==='coop'){
-      if(byGuest){ net.guestKills++; if(enemy._dmgByHost) net.hostAssists++; }
-      else { net.hostKills++; if(enemy._dmgByGuest) net.guestAssists++; }
+      if(byPid){
+        const killer = net.players.get(byPid);
+        if(killer) killer.kills++;
+        if(enemy._dmgByHost) net.hostAssists++;
+      } else {
+        net.hostKills++;
+      }
+      // everyone else who landed a hit on this enemy but didn't get the
+      // kill earns an assist, whether or not they're also the killer's pid
+      if(enemy._dmgByPids) enemy._dmgByPids.forEach(pid=>{
+        if(pid===byPid) return;
+        const p = net.players.get(pid);
+        if(p) p.assists++;
+      });
       netSendStats();
     }
     checkRoundClear();
@@ -3378,7 +3400,6 @@ const _combatForward = new THREE.Vector3();
 const _combatRight = new THREE.Vector3();
 const _combatMoveVec = new THREE.Vector3();
 const _combatDesired = new THREE.Vector3();
-const _guestPosScratch = new THREE.Vector3();
 const ENEMY_COMBAT_COLOR = new THREE.Color(0xd23c3c);
 const ENEMY_IDLE_COLOR = new THREE.Color(0x8a2e2e);
 function hasLineOfSight(fromVec, toVec){
@@ -3602,7 +3623,7 @@ function attemptEnemyShot(en, distance, target){
   // exposure modifiers reflect whichever player is actually being shot at -
   // the local player's own crouch/lean/sprint state is irrelevant when an
   // enemy is engaging the co-op guest instead
-  const exposure = target.isLocal ? { crouching, leanAmount, sprinting } : { crouching: !!net.remote?.crouch, leanAmount: net.remote?.lean||0, sprinting: !!net.remote?.sprinting };
+  const exposure = target.isLocal ? { crouching, leanAmount, sprinting } : { crouching: !!target.xf?.crouch, leanAmount: target.xf?.lean||0, sprinting: !!target.xf?.sprinting };
   if(exposure.crouching) baseChance *= 0.55;
   if(Math.abs(exposure.leanAmount) > 0.5) baseChance *= 0.6;
   if(exposure.sprinting) baseChance *= 0.7;
@@ -3626,7 +3647,7 @@ function attemptEnemyShot(en, distance, target){
   if(anyHit) totalDmg = applyDamageGuarantees(wpn, totalDmg, false, TARGET_HEALTH, distance);
   if(totalDmg>0){
     if(target.isLocal) damagePlayer(totalDmg, en);
-    else netDamageGuest(totalDmg);
+    else netDamagePlayer(target.pid, totalDmg);
   }
   return true;
 }
@@ -3650,21 +3671,31 @@ function attemptEnemyShot(en, distance, target){
 // Both modes share the same avatar/puppet plumbing and the same transform
 // wire format.
 // ---------------------------------------------------------------------------
+// co-op scales to up to this many guests (5 total with the host) - PvP
+// stays a strict 1v1 duel and doesn't use any of the multi-guest plumbing
+// below (net.conns/net.players), only the original single net.conn/
+// net.remote/net.remoteAvatar fields, unchanged from the 2-player design.
+const MAX_GUESTS = 4;
 const net = {
   mode: 'solo',            // 'solo' | 'coop' | 'pvp'
   role: null,               // 'host' | 'guest' | null
+  myPid: null,               // this client's own id: 'host', or 'p1'..'p4' for a guest
   peer: null, conn: null, connected: false,
-  remote: null,              // last received remote transform message
-  remoteAvatar: null,         // THREE-side puppet representing the other player
+  remote: null,              // PVP ONLY - last received remote transform message
+  remoteAvatar: null,         // PVP ONLY - THREE-side puppet representing the opponent
   puppets: new Map(),          // guest-side, co-op: netId -> enemy puppet object
-  guestHealth: 100, guestDown: false, // host-authoritative record of the guest's health, co-op
+  // CO-OP (2-5 players): host-side map of every connected guest's live
+  // DataConnection, keyed by the pid the host assigned them on join
+  conns: new Map(),
+  // CO-OP: every OTHER connected player's live state, on both host and
+  // guest - pid -> { health, dead, kills, deaths, assists, lastXf, avatar,
+  // weapon }. Host populates one entry per connected guest; a guest
+  // populates one entry per OTHER player (the host, plus any other guests,
+  // relayed through the host) so everyone renders everyone else.
+  players: new Map(),
+  lobbyStarted: false,       // host, co-op: true once the map's been picked - gates further joins
   myKills: 0, theirKills: 0,    // pvp
-  // co-op scoreboard - host-authoritative (same reasoning as guestHealth
-  // above: only the host ever actually applies bot damage/kills or knows
-  // the true moment the guest's health hits zero), broadcast to the guest
-  // via netSendStats() whenever any of these change
-  hostKills: 0, guestKills: 0, hostDeaths: 0, guestDeaths: 0,
-  hostAssists: 0, guestAssists: 0, // whoever DIDN'T land the killing blow, if they still damaged that enemy at some point (see damageEnemy)
+  hostKills: 0, hostDeaths: 0, hostAssists: 0, // co-op - the host's own row; each guest's stats live in net.players.get(pid)
   pvpRespawning: false,
   lastSendT: 0,
   sinceEnemySend: 0,
@@ -3686,10 +3717,33 @@ function generateRoomCode(){
   return s;
 }
 
+// the host's own OUTGOING broadcasts (periodic transform, enemy snapshots,
+// round/stat updates...) - in co-op this fans out to every connected guest
+// instead of the single net.conn PvP uses. A guest always just sends
+// straight to the host on its one connection, same in both modes. Guest-
+// to-guest traffic in co-op is a separate path: the host relays it
+// explicitly (see onGuestMessage/relayToGuests below), stamping the
+// sender's pid, since a guest only ever has a connection to the host.
 function netSend(msg){
+  if(net.mode==='coop' && net.role==='host'){
+    net.conns.forEach(conn=>{
+      if(conn.open){ try{ conn.send(msg); }catch(e){} }
+    });
+    return;
+  }
   if(net.conn && net.conn.open){
     try{ net.conn.send(msg); }catch(e){ /* connection mid-teardown - next tick will notice */ }
   }
+}
+function sendToGuest(pid, msg){
+  const conn = net.conns.get(pid);
+  if(conn && conn.open){ try{ conn.send(msg); }catch(e){} }
+}
+function relayToGuests(msg, exceptPid){
+  net.conns.forEach((conn, pid)=>{
+    if(pid===exceptPid) return;
+    if(conn.open){ try{ conn.send(msg); }catch(e){} }
+  });
 }
 
 // STUN alone only gets two peers talking directly when both sides' NAT
@@ -3736,27 +3790,99 @@ function armConnectTimeout(){
 }
 
 async function hostGame(mode){
-  net.mode = mode; net.role = 'host';
+  net.mode = mode; net.role = 'host'; net.myPid = 'host';
   const code = generateRoomCode();
   document.getElementById('roomCodeDisplay').textContent = code;
   document.getElementById('modeGrid').classList.add('hidden');
   document.getElementById('joinPanel').classList.add('hidden');
   document.getElementById('hostWaitPanel').classList.remove('hidden');
+  document.getElementById('hostWaitTitle').textContent =
+    mode==='coop' ? 'ROOM CODE - SHARE WITH YOUR SQUAD (UP TO 4)' : 'ROOM CODE - SHARE WITH YOUR FRIEND';
+  net.conns.clear(); net.players.clear(); net.lobbyStarted = false;
+  renderLobbyRoster(); // shows the roster + START button immediately for co-op, even before anyone's joined
   setNetStatus('Connecting to signaling server...');
   const config = await fetchIceConfig();
   net.peer = new Peer('bp-'+code, { debug:0, config });
-  net.peer.on('open', ()=>{ setNetStatus('Share this code - waiting for player to join...'); armConnectTimeout(); });
+  net.peer.on('open', ()=>{ setNetStatus(mode==='coop' ? 'Share this code - players can join as they arrive...' : 'Share this code - waiting for player to join...'); armConnectTimeout(); });
   net.peer.on('connection', conn=>{
-    net.conn = conn;
-    wireConnection(()=>{
-      clearTimeout(net.connectTimeoutId);
-      netSend({t:'mode', mode:net.mode});
-      document.getElementById('connectScreen').classList.add('hidden');
-      document.getElementById('mapSelectScreen').classList.remove('hidden');
-      document.getElementById('mapSelectSub').textContent = mode==='pvp' ? 'SELECT ARENA - PVP' : 'SELECT INSERTION POINT - CO-OP';
-    });
+    if(mode==='pvp'){
+      // unchanged 1v1 behavior: exactly one opponent, auto-proceeds the
+      // instant they connect - PvP never sees a lobby/start-button step
+      if(net.conn){ conn.close(); return; }
+      net.conn = conn;
+      wireConnection(()=>{
+        clearTimeout(net.connectTimeoutId);
+        netSend({t:'mode', mode:net.mode});
+        document.getElementById('connectScreen').classList.add('hidden');
+        document.getElementById('mapSelectScreen').classList.remove('hidden');
+        document.getElementById('mapSelectSub').textContent = 'SELECT ARENA - PVP';
+      });
+      return;
+    }
+    // co-op: up to MAX_GUESTS, gathered in a lobby until the host clicks
+    // START (see startCoopBtn below) - a late connection attempt (lobby
+    // already started, or already full) gets a polite rejection instead of
+    // hanging with no explanation
+    if(net.lobbyStarted || net.conns.size >= MAX_GUESTS){
+      conn.on('open', ()=>{ try{ conn.send({t:'full'}); }catch(e){} setTimeout(()=>conn.close(), 500); });
+      return;
+    }
+    const pid = nextGuestPid();
+    net.conns.set(pid, conn);
+    net.players.set(pid, { health:100, dead:false, kills:0, deaths:0, assists:0, lastXf:null, avatar:null, weapon:'PISTOL' });
+    wireGuestConnection(pid, conn);
   });
   net.peer.on('error', err=> setNetStatus('Host error: '+err.type, true));
+}
+
+// assigns each connecting guest the lowest free slot id (so a departed
+// guest's slot is reused by the next joiner instead of counting up forever)
+function nextGuestPid(){
+  for(let i=1;i<=MAX_GUESTS;i++){ const pid='p'+i; if(!net.conns.has(pid)) return pid; }
+  return null; // shouldn't happen - caller already checked net.conns.size < MAX_GUESTS
+}
+
+function wireGuestConnection(pid, conn){
+  conn.on('open', ()=>{
+    net.connected = true;
+    clearTimeout(net.connectTimeoutId);
+    conn.send({t:'welcome', pid, mode:net.mode});
+    renderLobbyRoster();
+  });
+  conn.on('data', msg=> onGuestMessage(pid, msg));
+  conn.on('close', ()=>{
+    net.conns.delete(pid);
+    net.players.delete(pid);
+    removePlayerAvatar(pid);
+    net.connected = net.conns.size>0;
+    renderLobbyRoster();
+    relayToGuests({t:'playerLeft', pid});
+    if(netIsMultiplayer() && net.mode==='coop') updateScoreboard();
+  });
+  conn.on('error', ()=>{});
+}
+
+// the lobby roster shown to the host while waiting to start, AND kept live
+// during an active match too (reused as a simple "who's still connected"
+// readout - the panel itself is only visible pre-match, but keeping this
+// in sync costs nothing and means it's already right if the host ever
+// looks back at it)
+function renderLobbyRoster(){
+  const el = document.getElementById('lobbyRoster');
+  const startBtn = document.getElementById('startCoopBtn');
+  if(net.role!=='host' || net.mode!=='coop'){ el.classList.add('hidden'); startBtn.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  startBtn.classList.remove('hidden');
+  startBtn.disabled = net.lobbyStarted;
+  const rows = ['<div class="lobbySlot">HOST (YOU)</div>'];
+  for(let i=1;i<=MAX_GUESTS;i++){
+    const pid = 'p'+i;
+    rows.push(net.conns.has(pid)
+      ? `<div class="lobbySlot">PLAYER ${i} - CONNECTED</div>`
+      : `<div class="lobbySlot empty">PLAYER ${i} - open</div>`);
+  }
+  el.innerHTML = rows.join('');
+  setNetStatus(net.conns.size>0 ? `${net.conns.size}/${MAX_GUESTS} players connected - start whenever you're ready` : 'Share this code - players can join as they arrive...');
 }
 
 async function joinGame(code){
@@ -3784,39 +3910,69 @@ function wireConnection(onOpen){
   conn.on('error', ()=> setNetStatus('Connection error', true));
 }
 
+// used by: a guest's own connection to the host (both modes), and the
+// host's connection to its one opponent in PvP. A co-op HOST's incoming
+// guest traffic goes through onGuestMessage below instead (each guest is
+// its own connection, wired separately - see wireGuestConnection).
 function onNetMessage(msg){
   if(!msg || !msg.t) return;
   switch(msg.t){
     case 'mode': netOnModeChosen(msg.mode); break;
-    case 'roundInit': netApplyRoundInit(msg); break;         // host -> guest, co-op
-    case 'pvpInit': netApplyPvpInit(msg); break;              // host -> guest, pvp
-    case 'xf': net.remote = msg; if(net.role==='host') net.remoteEverConnected = true; break; // transform, both directions
-    case 'enemies': netApplyEnemySnapshot(msg.list); break;   // host -> guest, co-op
-    case 'hitEnemy':                                          // guest -> host, co-op
-      if(net.role==='host'){ const en = enemies[msg.i]; if(en) damageEnemy(en, msg.dmg, true); }
+    case 'welcome': net.myPid = msg.pid; break;                // host -> guest, co-op: this client's assigned id
+    case 'full': setNetStatus('That game is already full or in progress.', true); break; // host -> guest, co-op
+    case 'roundInit': netApplyRoundInit(msg); break;            // host -> guest, co-op
+    case 'pvpInit': netApplyPvpInit(msg); break;                // host -> guest, pvp
+    case 'xf':
+      if(net.mode==='pvp'){ net.remote = msg; if(net.role==='host') net.remoteEverConnected = true; }
+      else netApplyRemoteXf(msg);                               // co-op: could be the host or another guest, relayed through the host - msg.pid says which
       break;
-    case 'guestHealth': netApplyGuestHealth(msg.health); break; // host -> guest, co-op
-    case 'guestHeal':                                           // guest -> host, co-op
-      if(net.role==='host'){
-        net.guestHealth = Math.min(TARGET_HEALTH, net.guestHealth + msg.amount);
-        netSend({ t:'guestHealth', health:net.guestHealth });
-      }
-      break;
-    case 'stats':                                             // host -> guest, co-op
-      net.hostKills=msg.hostKills; net.guestKills=msg.guestKills;
-      net.hostDeaths=msg.hostDeaths; net.guestDeaths=msg.guestDeaths;
-      net.hostAssists=msg.hostAssists; net.guestAssists=msg.guestAssists;
-      updateScoreboard();
-      break;
+    case 'enemies': netApplyEnemySnapshot(msg.list); break;     // host -> guest, co-op
+    case 'yourHealth': netApplyGuestHealth(msg.health); break;  // host -> guest, co-op: MY OWN health, host-authoritative
+    case 'stats': netApplyStats(msg); break;                    // host -> guest, co-op
     case 'pickupSpawn':                                         // host -> guest, co-op
       if(net.role==='guest') spawnPickup(msg.x, msg.z, msg.weaponType, msg.id, true, msg.kind);
       break;
-    case 'pickupTaken': removePickupById(msg.id); break;        // co-op, either direction - whoever didn't grab it locally removes their copy
+    case 'pickupTaken': removePickupById(msg.id); break;        // co-op, relayed - whoever didn't grab it locally removes their copy
+    case 'playerLeft': netApplyPlayerLeft(msg.pid); break;      // host -> guest, co-op
     case 'squadDown': netApplySquadDown(); break;               // host -> guest, co-op
     case 'squadCleared': netApplySquadCleared(); break;         // host -> guest, co-op
     case 'hitPlayer': netApplyPvpHit(msg.dmg); break;           // pvp, either direction
     case 'killedBy': net.myKills++; updateMpHUD(); break;       // pvp
     case 'ping': netSend({t:'pong', ts: msg.ts}); break;
+    case 'pong': net.rtt = Math.round(performance.now() - msg.ts); break;
+  }
+}
+
+// host-side, co-op only: incoming traffic from ONE specific guest (pid is
+// which connection it arrived on, assigned by the host at join time - a
+// guest never has to self-report its own id). 'xf' gets relayed to every
+// OTHER connected guest (each guest only has a connection to the host, so
+// the host is the only one who can forward guest-to-guest traffic).
+function onGuestMessage(pid, msg){
+  if(!msg || !msg.t) return;
+  switch(msg.t){
+    case 'xf': {
+      msg.pid = pid; // authoritative - the host decides identity, not the client
+      const p = net.players.get(pid);
+      if(p) p.lastXf = msg;
+      relayToGuests(msg, pid);
+      break;
+    }
+    case 'hitEnemy': { const en = enemies[msg.i]; if(en) damageEnemy(en, msg.dmg, pid); break; }
+    case 'guestHeal': {
+      const p = net.players.get(pid);
+      if(p && p.health>0){
+        p.health = Math.min(TARGET_HEALTH, p.health + msg.amount);
+        sendToGuest(pid, { t:'yourHealth', health:p.health });
+      }
+      break;
+    }
+    case 'pickupTaken': removePickupById(msg.id); relayToGuests(msg, pid); break;
+    case 'ping': sendToGuest(pid, {t:'pong', ts: msg.ts}); break;
+    // the host's own PING readout isn't meaningfully single-valued with up
+    // to 4 guests each at their own latency - just shows whichever guest
+    // most recently replied, a rough "is anyone's connection struggling"
+    // signal rather than a precise per-player number
     case 'pong': net.rtt = Math.round(performance.now() - msg.ts); break;
   }
 }
@@ -3827,36 +3983,111 @@ function netOnModeChosen(mode){
   showOverlay('BREACH <span>PROTOCOL</span>', (mode==='pvp'?'PVP':'CO-OP')+' - WAITING FOR HOST', 'STANDBY', false);
 }
 
+// a co-op player's puppet, keyed by pid - built lazily the first time we
+// see that player's transform, torn down explicitly on disconnect (see
+// removePlayerAvatar/netApplyPlayerLeft) since buildEnemy() parents it
+// straight into enemyGroup with no other owner tracking it
+function buildCoopAvatar(weaponType){
+  const av = buildEnemy({ pos:[0,0], patrol:[[0,0]] }, weaponType || 'PISTOL');
+  av.bodyMesh.material = av.bodyMesh.material.clone(); av.bodyMesh.material.color.setHex(0x2e6e8a); // blue teammate, same tint co-op used with 1 guest
+  av.state = 'COMBAT'; // always the "gun raised" pose, like an actual player holding their weapon
+  av.hitMeshes.forEach(m=> m.userData.isRemoteAvatar = true);
+  av._lastFireFlag = 0;
+  return av;
+}
+// applies one remote player's transform - on a guest this could be the
+// host's own broadcast or another guest's, relayed through the host
+// either way (msg.pid says which); on the host it's never called (the
+// host gets every guest's xf directly via onGuestMessage instead)
+function netApplyRemoteXf(msg){
+  if(!msg.pid || msg.pid===net.myPid) return;
+  let p = net.players.get(msg.pid);
+  if(!p){ p = { health:100, dead:false, kills:0, deaths:0, assists:0, lastXf:null, avatar:null, weapon:'PISTOL' }; net.players.set(msg.pid, p); }
+  p.lastXf = msg;
+  p.weapon = msg.weapon;
+}
+function removePlayerAvatar(pid){
+  const p = net.players.get(pid);
+  if(p && p.avatar) enemyGroup.remove(p.avatar.group);
+}
+function netApplyPlayerLeft(pid){
+  removePlayerAvatar(pid);
+  net.players.delete(pid);
+}
+// drives every OTHER connected player's puppet (host + relayed guests) -
+// called every frame from netTick for co-op, alongside updateRemoteAvatar
+// which stays PvP-only and untouched
+function updateCoopAvatars(dt){
+  net.players.forEach(p=>{
+    const xf = p.lastXf;
+    if(!xf) return;
+    if(!p.avatar) p.avatar = buildCoopAvatar(xf.weapon);
+    const av = p.avatar;
+    av.group.visible = !xf.dead;
+    av.group.position.x += (xf.x-av.group.position.x)*Math.min(1,dt*14);
+    av.group.position.z += (xf.z-av.group.position.z)*Math.min(1,dt*14);
+    av.group.position.y += ((xf.y - (xf.crouch?EYE_CROUCH:EYE_STAND)) - av.group.position.y)*Math.min(1,dt*10);
+    let diff = xf.yaw - av.facing;
+    while(diff>Math.PI) diff-=Math.PI*2; while(diff<-Math.PI) diff+=Math.PI*2;
+    av.facing += diff*Math.min(1,dt*14);
+    av.group.rotation.y = av.facing;
+    av.headMesh.rotation.x = THREE.MathUtils.clamp(xf.pitch||0, -1.35, 1.35);
+    if(xf.fireFlag !== av._lastFireFlag){
+      av._lastFireFlag = xf.fireFlag;
+      av.muzzleFlash.material.opacity = 1; av.muzzleLight.intensity = 3.4; av.recoilTimer = 0.16;
+    }
+    if(av.hitFlashTimer>0){ av.hitFlashTimer -= dt; av.bodyMesh.material.color.setHex(0xffffff); }
+    const moving = dist2D(av.group.position, [xf.x, xf.z]) > 0.02;
+    animateEnemyPose(av, dt, moving, xf.crouch);
+  });
+}
+
 // ---- co-op: enemy targeting extension (used by updateEnemy/attemptEnemyShot above) ----
-function getGuestPos(){
-  if(net.role==='host' && net.mode==='coop' && net.connected && net.remote && net.guestHealth>0){
-    return _guestPosScratch.set(net.remote.x, net.remote.y, net.remote.z);
-  }
-  return null;
-}
+// up to MAX_GUESTS candidate positions plus the host's own - reused scratch
+// vectors instead of allocating one per enemy per re-pick, same reasoning
+// as every other hot-path scratch object in this file
+const _targetScratch = Array.from({length:MAX_GUESTS}, ()=> new THREE.Vector3());
 function pickEnemyTarget(en, eyePos, dt){
-  const guestPos = getGuestPos();
-  if(!guestPos){ en.targetIsLocal = true; return { pos: yawObject.position, isLocal:true }; }
-  // re-evaluate which player is nearer only every half second, not every
-  // frame, so an enemy doesn't flicker its aim between two equally-close
-  // targets
   en._targetPickTimer = (en._targetPickTimer||0) - dt;
-  if(en.targetIsLocal==null || en._targetPickTimer<=0){
+  if(en.targetPid==null || en._targetPickTimer<=0){
     en._targetPickTimer = 0.5;
-    en.targetIsLocal = eyePos.distanceTo(yawObject.position) <= eyePos.distanceTo(guestPos);
+    en.targetPid = 'host';
+    let bestDist = eyePos.distanceTo(yawObject.position);
+    if(net.role==='host' && net.mode==='coop' && net.connected){
+      let i = 0;
+      net.players.forEach((p, pid)=>{
+        if(i>=MAX_GUESTS || !p.lastXf || p.health<=0) return;
+        const v = _targetScratch[i++].set(p.lastXf.x, p.lastXf.y, p.lastXf.z);
+        const d = eyePos.distanceTo(v);
+        if(d < bestDist){ bestDist = d; en.targetPid = pid; }
+      });
+    }
   }
-  return en.targetIsLocal ? { pos: yawObject.position, isLocal:true } : { pos: guestPos, isLocal:false };
+  if(en.targetPid==='host') return { pos: yawObject.position, isLocal:true, pid:'host' };
+  const p = net.players.get(en.targetPid);
+  if(!p || !p.lastXf || p.health<=0){ en.targetPid = 'host'; return { pos: yawObject.position, isLocal:true, pid:'host' }; }
+  return { pos: _targetScratch[0].set(p.lastXf.x, p.lastXf.y, p.lastXf.z), isLocal:false, pid: en.targetPid, xf: p.lastXf };
 }
-function netDamageGuest(amount){
-  if(net.guestHealth<=0) return;
-  net.guestHealth = Math.max(0, net.guestHealth-amount);
-  netSend({t:'guestHealth', health:net.guestHealth});
-  if(net.guestHealth<=0){ net.guestDeaths++; netSendStats(); }
-  if(net.guestHealth<=0 && !playerDead && !roundCleared){
-    // shared-fate round: either player going down pauses the whole squad's
-    // simulation (enemies freeze, same gate as a solo death) until a retry
-    playerDead = true;
-    showOverlay('SQUAD <span>DOWN</span>', 'YOUR TEAMMATE WAS ELIMINATED', 'CLICK TO RETRY ROUND', false);
+// host-authoritative damage to ONE specific connected guest (pid) - same
+// shared-fate rule as the original 2-player design, just generalized: ANY
+// player going down (host or any guest) pauses the whole squad's
+// simulation until a retry, not just when all are down. That's a
+// deliberate choice to keep the existing, already-tuned co-op feel rather
+// than inventing a new "last one standing" ruleset alongside the player-
+// count increase.
+function netDamagePlayer(pid, amount){
+  const p = net.players.get(pid);
+  if(!p || p.health<=0) return;
+  p.health = Math.max(0, p.health-amount);
+  sendToGuest(pid, {t:'yourHealth', health:p.health});
+  if(p.health<=0){
+    p.dead = true;
+    p.deaths++; netSendStats();
+    if(!playerDead && !roundCleared){
+      playerDead = true;
+      showOverlay('SQUAD <span>DOWN</span>', 'A TEAMMATE WAS ELIMINATED', 'CLICK TO RETRY ROUND', false);
+      netSend({t:'squadDown'}); // reaches every other connected guest; the one who just died gets there via their own 'yourHealth' <= 0 instead
+    }
   }
 }
 function netApplyGuestHealth(health){
@@ -3877,6 +4108,16 @@ function netApplySquadCleared(){
   roundCleared = true;
   showOverlay('AREA <span>CLEARED</span>', 'ALL HOSTILES NEUTRALIZED', 'STANDBY', false);
 }
+function netApplyStats(msg){
+  net.hostKills=msg.hostKills; net.hostDeaths=msg.hostDeaths; net.hostAssists=msg.hostAssists;
+  Object.keys(msg.guestStats||{}).forEach(pid=>{
+    let p = net.players.get(pid);
+    if(!p){ p = { health:100, dead:false, kills:0, deaths:0, assists:0, lastXf:null, avatar:null, weapon:'PISTOL' }; net.players.set(pid, p); }
+    const s = msg.guestStats[pid];
+    p.kills = s.kills; p.deaths = s.deaths; p.assists = s.assists;
+  });
+  updateScoreboard();
+}
 
 // ---- co-op: round/map mirroring + enemy puppets on the guest ----
 // the guest lands right next to the host instead of at the map's separate
@@ -3892,8 +4133,15 @@ function netApplySquadCleared(){
 // geometry on some maps' narrower spawn nooks.
 function coopGuestSpawnPos(){
   const [sx, sz] = activeMap.spawn;
-  const offsets = [[1.1,0],[-1.1,0],[0,1.1],[0,-1.1],[1.1,1.1],[-1.1,-1.1],[1.1,-1.1],[-1.1,1.1]];
-  for(const [ox,oz] of offsets){
+  const offsets = [[1.1,0],[-1.1,0],[0,1.1],[0,-1.1],[1.1,1.1],[-1.1,-1.1],[1.1,-1.1],[-1.1,1.1],
+    [1.9,0.5],[-1.9,-0.5],[0.5,1.9],[-0.5,-1.9]];
+  // rotate the try-order by this guest's own slot so up to 4 guests each
+  // reach for a different spot first, instead of every one of them
+  // independently landing on the exact same first-clear offset and
+  // spawning stacked on top of each other
+  const myIdx = (net.myPid && net.myPid[0]==='p') ? (parseInt(net.myPid.slice(1),10)-1) % offsets.length : 0;
+  const rotated = offsets.slice(myIdx).concat(offsets.slice(0, myIdx));
+  for(const [ox,oz] of rotated){
     if(boxIsFree(sx+ox, sz+oz, 0)) return [sx+ox, sz+oz];
   }
   return [sx, sz]; // every offset blocked - fall back to the host's exact spot rather than somewhere unvalidated
@@ -4021,7 +4269,8 @@ function updateRemoteAvatar(dt){
 // ---- per-frame networking tick, called from the main animate() loop ----
 function netTick(dt){
   if(!netIsMultiplayer() || !net.connected) return;
-  updateRemoteAvatar(dt);
+  if(net.mode==='pvp') updateRemoteAvatar(dt);
+  else updateCoopAvatars(dt);
   if(net.role==='guest' || net.mode==='pvp'){
     enemies.forEach(en=> updateNetPuppet(en, dt)); // co-op guest only (pvp has no enemies at all)
   }
@@ -4029,7 +4278,7 @@ function netTick(dt){
   if(net.lastSendT >= 1/18){
     net.lastSendT = 0;
     netSend({
-      t:'xf', x:yawObject.position.x, y:yawObject.position.y, z:yawObject.position.z,
+      t:'xf', pid: net.myPid, x:yawObject.position.x, y:yawObject.position.y, z:yawObject.position.z,
       yaw, pitch, crouch:crouching, lean:leanAmount, sprinting, scoped,
       weapon: currentWeapon.key, health: playerHealth, dead: playerDead,
       fireFlag: net.fireFlag,
@@ -4156,12 +4405,21 @@ function drawMinimap(){
     ctx.strokeRect(Math.min(x0,x1), Math.min(y0,y1), Math.abs(x1-x0)||1, Math.abs(y1-y0)||1);
   }
 
-  // teammate (multiplayer only), drawn before the local player so the
-  // player's own marker stays on top if the two overlap
-  if(netIsMultiplayer() && net.connected && net.remote){
-    const [px,py] = toPx(net.remote.x, net.remote.z);
-    ctx.fillStyle = net.mode==='pvp' ? '#c2472f' : '#4a9d6e';
-    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+  // teammate(s)/opponent (multiplayer only), drawn before the local player
+  // so the player's own marker stays on top if any overlap
+  if(netIsMultiplayer() && net.connected){
+    if(net.mode==='pvp' && net.remote){
+      const [px,py] = toPx(net.remote.x, net.remote.z);
+      ctx.fillStyle = '#c2472f';
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+    } else if(net.mode==='coop'){
+      ctx.fillStyle = '#4a9d6e';
+      net.players.forEach(p=>{
+        if(!p.lastXf) return;
+        const [px,py] = toPx(p.lastXf.x, p.lastXf.z);
+        ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+      });
+    }
   }
 
   // local player - a small triangle pointing in the current facing direction
@@ -4185,8 +4443,13 @@ function updateMpHUD(){
   if(net.mode==='pvp'){
     html = `YOU <b>${net.myKills}</b> &nbsp; THEM <b>${net.theirKills}</b>`;
   } else {
-    const hp = Math.max(0, Math.round(net.role==='host' ? net.guestHealth : (net.remote?.health ?? 100)));
-    html = `TEAMMATE <b class="${hp<=0?'down':'ok'}">${hp<=0?'DOWN':hp+'%'}</b>`;
+    // a single "teammate health" readout doesn't scale past 1 guest - shows
+    // how many of the whole squad (this client included) are still up
+    // instead. Each player self-reports its own dead state in its own
+    // transform broadcast, so this reads the same way on host or guest.
+    let alive = playerDead ? 0 : 1, total = 1;
+    net.players.forEach(p=>{ total++; if(p.lastXf && !p.lastXf.dead) alive++; });
+    html = `SQUAD <b class="${alive<=1?'down':'ok'}">${alive}/${total} UP</b>`;
   }
   // this runs every frame (called from animate()) but the actual content
   // only changes on a kill/heal - skip the DOM write (and its style/layout
@@ -4199,24 +4462,31 @@ function updateMpHUD(){
 // the numbers, called both when the board is shown and whenever a kill/
 // death actually changes so it stays live if you're already holding Tab
 function updateScoreboard(){
-  let youK, youD, youA, themK, themD, themA, themLabel;
+  const rowsEl = document.getElementById('sbRows');
   if(net.mode==='pvp'){
     // no third party in a 1v1, so assists are never a thing here - always 0
-    youK = net.myKills; youD = net.theirKills; youA = 0;
-    themK = net.theirKills; themD = net.myKills; themA = 0;
-    themLabel = 'THEM';
-  } else {
-    themLabel = 'TEAMMATE';
-    if(net.role==='host'){ youK=net.hostKills; youD=net.hostDeaths; youA=net.hostAssists; themK=net.guestKills; themD=net.guestDeaths; themA=net.guestAssists; }
-    else { youK=net.guestKills; youD=net.guestDeaths; youA=net.guestAssists; themK=net.hostKills; themD=net.hostDeaths; themA=net.hostAssists; }
+    rowsEl.innerHTML =
+      `<div class="sbRow"><span>YOU</span><span>${net.myKills}</span><span>${net.theirKills}</span><span>0</span></div>` +
+      `<div class="sbRow"><span>THEM</span><span>${net.theirKills}</span><span>${net.myKills}</span><span>0</span></div>`;
+    return;
   }
-  document.getElementById('sbYouK').textContent = youK;
-  document.getElementById('sbYouD').textContent = youD;
-  document.getElementById('sbYouA').textContent = youA;
-  document.getElementById('sbThemK').textContent = themK;
-  document.getElementById('sbThemD').textContent = themD;
-  document.getElementById('sbThemA').textContent = themA;
-  document.getElementById('sbThemLabel').textContent = themLabel;
+  // co-op: one row per connected player (up to 5 total) instead of a fixed
+  // you/them pair - the host's own stats live in net.hostKills/etc, each
+  // guest's in net.players.get(pid), a single shared shape either role
+  // reads the same way
+  const row = (label, s)=> `<div class="sbRow"><span>${label}</span><span>${s.kills}</span><span>${s.deaths}</span><span>${s.assists}</span></div>`;
+  const hostStats = { kills:net.hostKills, deaths:net.hostDeaths, assists:net.hostAssists };
+  const rows = [];
+  rows.push(row(net.role==='host' ? 'HOST (YOU)' : 'HOST', hostStats));
+  for(let i=1;i<=MAX_GUESTS;i++){
+    const pid = 'p'+i;
+    if(pid===net.myPid){
+      rows.push(row('YOU', net.players.get(pid) || {kills:0,deaths:0,assists:0}));
+    } else if(net.players.has(pid)){
+      rows.push(row('PLAYER '+i, net.players.get(pid)));
+    }
+  }
+  rowsEl.innerHTML = rows.join('');
 }
 
 // always-on perf readout (not just multiplayer) - FPS tells you if THIS
@@ -4325,11 +4595,23 @@ document.getElementById('joinCodeInput').addEventListener('keydown', e=>{
   document.getElementById(btnId).addEventListener('click', ()=>{
     clearTimeout(net.connectTimeoutId);
     if(net.peer){ try{ net.peer.destroy(); }catch(e){} net.peer=null; net.conn=null; net.connected=false; }
+    net.conns.clear(); net.players.clear(); net.lobbyStarted = false;
     net.role=null; net.mode='solo';
     document.getElementById(panelId).classList.add('hidden');
     document.getElementById('modeGrid').classList.remove('hidden');
     setNetStatus('');
   });
+});
+// co-op only - the host clicks this once ready (0 or more guests already
+// connected) to lock the roster and move on to map select, same map-select
+// screen and flow PvP has always used. PvP never sees this: it auto-
+// proceeds the instant its one opponent connects, same as before.
+document.getElementById('startCoopBtn').addEventListener('click', ()=>{
+  document.getElementById('hostWaitPanel').classList.add('hidden');
+  document.getElementById('connectScreen').classList.add('hidden');
+  document.getElementById('mapSelectScreen').classList.remove('hidden');
+  document.getElementById('mapSelectSub').textContent = 'SELECT INSERTION POINT - CO-OP';
+  netSend({t:'mode', mode:net.mode}); // tell every connected guest we're underway
 });
 
 // map select: picking a card both chooses the starting map and serves as
@@ -4350,11 +4632,12 @@ document.querySelectorAll('#mapGrid .mapCard').forEach(btn=>{
     }
     roundNum = 1;
     if(net.mode==='coop'){
+      net.lobbyStarted = true; // no more joins once the map's picked and the round's about to start
       // fresh co-op session - the scoreboard is a running match total, not
       // a per-round one, so it only resets here (session start), never on
       // an individual round transition/retry
-      net.hostKills=0; net.guestKills=0; net.hostDeaths=0; net.guestDeaths=0;
-      net.hostAssists=0; net.guestAssists=0;
+      net.hostKills=0; net.hostDeaths=0; net.hostAssists=0;
+      net.players.forEach(p=>{ p.kills=0; p.deaths=0; p.assists=0; });
       netSendStats();
     }
     resetRound(true); // spawnRound() (inside resetRound) broadcasts roundInit when hosting co-op
