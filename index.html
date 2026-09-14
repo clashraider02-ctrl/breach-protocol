@@ -69,9 +69,9 @@
   #minimap{ display:block; width:100%; height:100%; }
 
   /* hold-Tab scoreboard, multiplayer only */
-  #scoreboard{ position:absolute; left:50%; top:80px; transform:translateX(-50%); background:rgba(8,8,10,.88); border:1px solid #3a3a3a; padding:14px 20px; min-width:340px; }
+  #scoreboard{ position:absolute; left:50%; top:80px; transform:translateX(-50%); background:rgba(8,8,10,.88); border:1px solid #3a3a3a; padding:14px 20px; min-width:400px; }
   #scoreboardTitle{ font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:4px; color:var(--caution); text-align:center; margin-bottom:10px; }
-  .sbRow{ display:grid; grid-template-columns:1fr 70px 70px 70px; font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); padding:4px 0; text-align:right; }
+  .sbRow{ display:grid; grid-template-columns:1fr 60px 60px 60px 60px; font-family:var(--font-mono); font-size:12px; letter-spacing:1px; color:var(--text); padding:4px 0; text-align:right; }
   .sbRow span:first-child{ text-align:left; }
   .sbHead{ color:var(--text-dim); font-size:10.5px; border-bottom:1px solid #35373a; padding-bottom:6px; margin-bottom:2px; }
 
@@ -115,6 +115,11 @@
   #overlay{ position:fixed; inset:0; background:rgba(6,6,8,.94); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:20; cursor:pointer; text-align:center; }
   #overlay h1{ color:var(--text); font-family:var(--font-display); font-weight:700; font-size:42px; letter-spacing:8px; margin:0 0 10px; text-wrap:balance; }
   #overlay h1 span{ color:var(--danger); }
+  /* "YOU ARE DOWN" / "SQUAD DOWN" / "ELIMINATED" - bigger and fully red,
+     so a death reads as unmistakably different from a neutral prompt like
+     "BREACH PROTOCOL" or a win like "AREA CLEARED" at a glance. #overlay
+     itself is already centered via flexbox; this only changes size/color. */
+  #overlay h1.down, #overlay h1.down span{ color:var(--danger); font-size:64px; }
   #overlay p{ color:var(--text-dim); font-family:var(--font-mono); font-size:12px; letter-spacing:3px; margin:4px 0; }
   #overlay .prompt{ margin-top:26px; color:var(--caution); font-family:var(--font-display); font-weight:600; font-size:14px; letter-spacing:4px; animation:pulse 1.6s infinite; }
   #overlay .legend{ margin-top:30px; color:var(--text-dim); font-family:var(--font-mono); font-size:11px; line-height:2; letter-spacing:.5px; }
@@ -190,7 +195,7 @@
 
   <div id="scoreboard" class="hidden">
     <div id="scoreboardTitle">SCOREBOARD</div>
-    <div class="sbRow sbHead"><span>PLAYER</span><span>KILLS</span><span>DEATHS</span><span>ASSISTS</span></div>
+    <div class="sbRow sbHead"><span>PLAYER</span><span>KILLS</span><span>DEATHS</span><span>ASSISTS</span><span>K/D</span></div>
     <div id="sbRows"></div>
   </div>
 
@@ -3490,7 +3495,7 @@ function checkSquadWipe(){
 function declareSquadWipe(){
   squadWiped = true;
   document.getElementById('spectateBanner').classList.add('hidden');
-  showOverlay('SQUAD <span>DOWN</span>', 'THE WHOLE SQUAD WAS ELIMINATED', 'CLICK TO RETRY ROUND', false);
+  showOverlay('SQUAD <span>DOWN</span>', 'THE WHOLE SQUAD WAS ELIMINATED', 'CLICK TO RETRY ROUND', false, true);
   netSend({t:'squadDown'});
 }
 
@@ -3514,7 +3519,7 @@ function damagePlayer(amount, fromEnemy){
       if(checkSquadWipe()) declareSquadWipe();
       return;
     }
-    showOverlay('YOU ARE <span>DOWN</span>', 'ELIMINATED BY HOSTILE FORCE', 'CLICK TO RETRY ROUND', false);
+    showOverlay('YOU ARE <span>DOWN</span>', 'ELIMINATED BY HOSTILE FORCE', 'CLICK TO RETRY ROUND', false, true);
   }
 }
 
@@ -4258,7 +4263,7 @@ function netApplySquadDown(){
   squadWiped = true;
   playerDead = true; // covers the (rare) case this arrives before our own 'yourHealth' <= 0 does
   document.getElementById('spectateBanner').classList.add('hidden');
-  showOverlay('SQUAD <span>DOWN</span>', 'THE WHOLE SQUAD WAS ELIMINATED', 'STANDBY', false);
+  showOverlay('SQUAD <span>DOWN</span>', 'THE WHOLE SQUAD WAS ELIMINATED', 'STANDBY', false, true);
 }
 function netApplySquadCleared(){
   if(roundCleared) return;
@@ -4478,7 +4483,7 @@ function netApplyPvpHit(dmg, fromPid){
       netSend({t:'pvpDeath', killerPid: fromPid});
     }
     updateMpHUD();
-    showOverlay('ELIMINATED', 'CHOOSE YOUR LOADOUT', 'STANDBY', false);
+    showOverlay('ELIMINATED', 'CHOOSE YOUR LOADOUT', 'STANDBY', false, true);
     // same loadout screen as match start - letting the click there double
     // as the re-engage gesture means no separate "click to respawn" step
     setTimeout(()=>{
@@ -4614,7 +4619,8 @@ function updateScoreboard(){
   // etc, each guest's in net.players.get(pid), a single shared shape
   // either role reads the same way. PvP just never earns assists (no
   // multi-hit credit tracked between players), so that column stays 0.
-  const row = (label, s)=> `<div class="sbRow"><span>${label}</span><span>${s.kills}</span><span>${s.deaths}</span><span>${s.assists}</span></div>`;
+  const kd = s => s.deaths>0 ? (s.kills/s.deaths).toFixed(1) : s.kills.toFixed(1);
+  const row = (label, s)=> `<div class="sbRow"><span>${label}</span><span>${s.kills}</span><span>${s.deaths}</span><span>${s.assists}</span><span>${kd(s)}</span></div>`;
   const hostStats = { kills:net.hostKills, deaths:net.hostDeaths, assists:net.hostAssists };
   const rows = [];
   rows.push(row(net.role==='host' ? 'HOST (YOU)' : 'HOST', hostStats));
@@ -4683,11 +4689,13 @@ function updateHealthHUD(){
   document.getElementById('healthBar').style.width = Math.max(0,playerHealth)+'%';
 }
 
-function showOverlay(titleHtml, sub, prompt, showLegend){
+function showOverlay(titleHtml, sub, prompt, showLegend, isDown){
   setScoped(false); // pause/death/round-clear always drops the scope so FOV/overlay don't get stuck
   document.getElementById('overlaySub').textContent = sub;
   document.getElementById('overlayPrompt').textContent = prompt;
-  document.querySelector('#overlay h1').innerHTML = titleHtml;
+  const h1 = document.querySelector('#overlay h1');
+  h1.innerHTML = titleHtml;
+  h1.classList.toggle('down', !!isDown); // bigger, fully red - see the .down CSS rule
   document.getElementById('overlay').classList.remove('hidden');
   document.querySelector('#overlay .legend').style.display = showLegend? 'block':'none';
   container.style.cursor = '';
