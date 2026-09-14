@@ -3869,6 +3869,20 @@ function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
 
+// resolves any pid ('host', 'p1'..'p4') to a real display name once it's
+// known (from that player's own xf broadcast), falling back to the
+// existing generic "HOST"/"PLAYER N" labels until then
+function playerDisplayName(pid){
+  if(pid==='host'){
+    if(net.role==='host') return myPlayerName;
+    const h = net.players.get('host');
+    return (h && h.lastXf && h.lastXf.name) || 'HOST';
+  }
+  if(pid===net.myPid) return myPlayerName;
+  const p = net.players.get(pid);
+  return (p && p.lastXf && p.lastXf.name) || ('PLAYER '+String(pid||'').slice(1));
+}
+
 function netIsMultiplayer(){ return net.mode==='coop' || net.mode==='pvp'; }
 
 function setNetStatus(msg, isErr){
@@ -4587,7 +4601,11 @@ function netApplyPvpHit(dmg, fromPid){
       netSend({t:'pvpDeath', killerPid: fromPid});
     }
     updateMpHUD();
-    showOverlay('ELIMINATED', 'CHOOSE YOUR LOADOUT', 'STANDBY', false, true);
+    // showOverlay's sub text goes through .textContent, not innerHTML, so a
+    // peer-supplied name renders as literal text either way - no escaping
+    // needed here (unlike the innerHTML-based scoreboard/lobby roster)
+    const killerLabel = (fromPid && fromPid!==net.myPid) ? `KILLED BY ${playerDisplayName(fromPid)}` : 'CHOOSE YOUR LOADOUT';
+    showOverlay('ELIMINATED', killerLabel, 'STANDBY', false, true);
     // same loadout screen as match start - letting the click there double
     // as the re-engage gesture means no separate "click to respawn" step
     setTimeout(()=>{
@@ -4732,18 +4750,14 @@ function updateScoreboard(){
   const kd = s => s.deaths>0 ? (s.kills/s.deaths).toFixed(1) : s.kills.toFixed(1);
   const row = (label, s)=> `<div class="sbRow"><span>${escapeHtml(label)}</span><span>${s.kills}</span><span>${s.deaths}</span><span>${s.assists}</span><span>${kd(s)}</span></div>`;
   const hostStats = { kills:net.hostKills, deaths:net.hostDeaths, assists:net.hostAssists };
-  const hostP = net.players.get('host');
-  const hostName = net.role==='host' ? myPlayerName : (hostP && hostP.lastXf && hostP.lastXf.name) || 'HOST';
   const rows = [];
-  rows.push(row(net.role==='host' ? hostName+' (YOU)' : hostName, hostStats));
+  rows.push(row(playerDisplayName('host') + (net.role==='host' ? ' (YOU)' : ''), hostStats));
   for(let i=1;i<=MAX_GUESTS;i++){
     const pid = 'p'+i;
     if(pid===net.myPid){
       rows.push(row(myPlayerName+' (YOU)', net.players.get(pid) || {kills:0,deaths:0,assists:0}));
     } else if(net.players.has(pid)){
-      const p = net.players.get(pid);
-      const label = (p.lastXf && p.lastXf.name) || ('PLAYER '+i);
-      rows.push(row(label, p));
+      rows.push(row(playerDisplayName(pid), net.players.get(pid)));
     }
   }
   rowsEl.innerHTML = rows.join('');
