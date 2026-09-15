@@ -251,6 +251,29 @@
   #settingsControls{ margin-top:6px; text-align:left; color:var(--text-dim); font-family:var(--font-mono); font-size:10.5px; line-height:1.9; letter-spacing:.4px; border-top:1px solid #2a2c31; padding-top:18px; }
   #settingsControls div b{ color:#b8b4a8; }
 
+  /* skin cases - same modal language as settings, opened from its own
+     button on the mode-select screen */
+  #skinsBtn{ position:fixed; top:18px; right:150px; z-index:30; background:none; border:1px solid #454850; color:var(--text-dim); font-family:var(--font-mono); font-size:11px; letter-spacing:2px; padding:8px 12px; cursor:pointer; }
+  #skinsBtn:hover{ border-color:var(--caution); color:var(--text); }
+  #skinsScreen{ position:fixed; inset:0; background:rgba(6,6,8,.97); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:32; text-align:center; padding:24px; box-sizing:border-box; }
+  #skinsScreen h1{ color:var(--text); font-family:var(--font-display); font-weight:700; font-size:36px; letter-spacing:8px; margin:0 0 6px; }
+  #skinsScreen h1 span{ color:var(--danger); }
+  #skinsScreen > p{ color:var(--text-dim); font-family:var(--font-mono); font-size:12px; letter-spacing:2px; margin:4px 0 18px; }
+  #skinsScreen > p b{ color:var(--caution); }
+  #caseBtn{ background:#2a2c31; border:1px solid #454850; color:var(--text); font-family:var(--font-display); font-weight:600; letter-spacing:2px; font-size:12px; padding:11px 18px; cursor:pointer; }
+  #caseBtn:hover:not(:disabled){ background:#35383e; border-color:var(--caution); }
+  #caseBtn:disabled{ opacity:.4; cursor:default; }
+  #caseResult{ margin-top:10px; color:var(--ok); font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:2px; }
+  #skinsGrid{ display:grid; grid-template-columns:repeat(3, 100px); gap:12px; margin-top:22px; }
+  .skinSwatch{ padding:10px 6px; background:#15161a; border:1px solid #35373a; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; transition:border-color .15s, background .15s; }
+  .skinSwatch:hover{ border-color:#4a4d52; }
+  .skinSwatch.active{ border-color:var(--caution); background:rgba(217,165,60,.08); }
+  .skinSwatch.locked{ cursor:default; opacity:.35; }
+  .skinSwatch .swatchColor{ width:30px; height:30px; border-radius:50%; background:var(--swatch); border:1px solid rgba(255,255,255,.15); }
+  .skinSwatch .swatchLabel{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.5px; color:var(--text-dim); text-align:center; }
+  .skinSwatch.active .swatchLabel{ color:var(--caution); }
+  .skinsHint{ margin-top:20px !important; font-size:10.5px !important; letter-spacing:.5px !important; color:#5f5c54 !important; }
+
   @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
   .hidden{ display:none !important; }
 </style>
@@ -345,6 +368,7 @@
 
 <div id="connectScreen">
   <button id="settingsBtn">&#9881; SETTINGS</button>
+  <button id="skinsBtn">&#9670; SKINS</button>
   <h1>BREACH <span>PROTOCOL</span></h1>
   <p>SELECT MODE</p>
   <div id="nameRow">
@@ -433,6 +457,16 @@
     </div>
   </div>
   <button id="settingsBackBtn">&larr; back</button>
+</div>
+
+<div id="skinsScreen" class="hidden">
+  <h1>WEAPON <span>SKINS</span></h1>
+  <p>CREDITS: <b id="creditsVal">0</b></p>
+  <button id="caseBtn">OPEN CASE (<span id="caseCostVal">60</span>)</button>
+  <div id="caseResult" class="hidden"></div>
+  <div id="skinsGrid"></div>
+  <p class="skinsHint">Earned from zombie kills. Click an owned skin to equip it.</p>
+  <button id="skinsBackBtn">&larr; back</button>
 </div>
 
 <div id="mapSelectScreen" class="hidden">
@@ -1113,7 +1147,11 @@ gunGroup.add(muzzleLight);
 // with each silhouette's actual barrel length instead of one fixed spot)
 function buildViewModelParts(type){
   const parts = [];
-  const bodyMat = new THREE.MeshStandardMaterial({ color: WEAPONS[type].color, roughness:0.5, metalness:0.4 });
+  // an equipped skin (see SKIN CASES) recolors the main body parts of
+  // whichever gun is held - melee stays its own color, a reskin doesn't
+  // make much sense on a bare blade
+  const skinColor = type!=='KNIFE' && SKINS[equippedSkin] ? SKINS[equippedSkin].color : null;
+  const bodyMat = new THREE.MeshStandardMaterial({ color: skinColor!=null ? skinColor : WEAPONS[type].color, roughness:0.5, metalness:0.4 });
   function box(w,h,d,x,y,z,mat,rx){
     const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat||bodyMat);
     m.position.set(x,y,z);
@@ -1281,6 +1319,92 @@ document.getElementById('settingsBtn').addEventListener('click', ()=>{
 document.getElementById('settingsBackBtn').addEventListener('click', ()=>{
   document.getElementById('settingsScreen').classList.add('hidden');
 });
+
+// ---------------------------------------------------------------------------
+// SKIN CASES - a persistent (localStorage, unlike zombiePoints' per-match
+// wallet) currency earned from zombie kills, spent gambling on cosmetic
+// weapon skins. One skin is equipped at a time and recolors whichever gun
+// is currently held (see buildViewModelParts) - not a per-weapon loadout,
+// just a single global reskin, to keep the system bounded.
+// ---------------------------------------------------------------------------
+const SKINS_KEY = 'bp_skins';
+const SKINS = {
+  default:  { label:'STANDARD',   color:null,     cost:0 },
+  urban:    { label:'URBAN',      color:0x4a5c3a, cost:80 },
+  desert:   { label:'DESERT TAN', color:0xb89a68, cost:80 },
+  blackout: { label:'BLACKOUT',   color:0x14151a, cost:120 },
+  arctic:   { label:'ARCTIC',     color:0xd8e4ea, cost:120 },
+  inferno:  { label:'INFERNO',    color:0x8a2e1c, cost:150 },
+};
+const CASE_COST = 60;
+let credits = 0;
+let ownedSkins = ['default'];
+let equippedSkin = 'default';
+(function loadSkins(){
+  try{
+    const parsed = JSON.parse(localStorage.getItem(SKINS_KEY));
+    if(parsed){
+      if(typeof parsed.credits==='number') credits = Math.max(0, Math.floor(parsed.credits));
+      if(Array.isArray(parsed.owned)) ownedSkins = parsed.owned.filter(k=>SKINS[k]);
+      if(!ownedSkins.includes('default')) ownedSkins.unshift('default');
+      if(typeof parsed.equipped==='string' && ownedSkins.includes(parsed.equipped)) equippedSkin = parsed.equipped;
+    }
+  }catch(e){}
+})();
+function saveSkins(){ try{ localStorage.setItem(SKINS_KEY, JSON.stringify({ credits, owned:ownedSkins, equipped:equippedSkin })); }catch(e){} }
+function updateCreditsHUD(){
+  const el = document.getElementById('creditsVal');
+  if(el) el.textContent = credits;
+}
+function openSkinCase(){
+  const locked = Object.keys(SKINS).filter(k=>!ownedSkins.includes(k));
+  if(locked.length===0 || credits<CASE_COST) return;
+  credits -= CASE_COST;
+  const won = locked[Math.floor(Math.random()*locked.length)];
+  ownedSkins.push(won);
+  equippedSkin = won;
+  saveSkins();
+  updateCreditsHUD();
+  renderSkinsGrid();
+  setPlayerGunViewModel(currentWeapon.key); // re-skin whatever's currently held immediately
+  playHitmarkerSound(); // reused as a cheap "result" ding - no dedicated case-open asset
+  document.getElementById('caseResult').textContent = 'UNLOCKED: '+SKINS[won].label;
+  document.getElementById('caseResult').classList.remove('hidden');
+  clearTimeout(openSkinCase._t);
+  openSkinCase._t = setTimeout(()=> document.getElementById('caseResult').classList.add('hidden'), 3000);
+}
+function equipSkin(key){
+  if(!ownedSkins.includes(key)) return;
+  equippedSkin = key;
+  saveSkins();
+  renderSkinsGrid();
+  setPlayerGunViewModel(currentWeapon.key);
+}
+function renderSkinsGrid(){
+  const grid = document.getElementById('skinsGrid');
+  grid.innerHTML = Object.keys(SKINS).map(key=>{
+    const s = SKINS[key];
+    const owned = ownedSkins.includes(key);
+    const active = key===equippedSkin;
+    const swatchColor = s.color==null ? '#8a8a8a' : '#'+s.color.toString(16).padStart(6,'0');
+    const cls = 'skinSwatch'+(active?' active':'')+(owned?'':' locked');
+    return `<div class="${cls}" data-skin="${key}" style="--swatch:${swatchColor}"><div class="swatchColor"></div><div class="swatchLabel">${s.label}</div></div>`;
+  }).join('');
+  grid.querySelectorAll('.skinSwatch').forEach(el=>{
+    el.addEventListener('click', ()=> equipSkin(el.dataset.skin));
+  });
+  document.getElementById('caseBtn').disabled = credits<CASE_COST || Object.keys(SKINS).every(k=>ownedSkins.includes(k));
+}
+document.getElementById('caseCostVal').textContent = CASE_COST;
+document.getElementById('skinsBtn').addEventListener('click', ()=>{
+  updateCreditsHUD();
+  renderSkinsGrid();
+  document.getElementById('skinsScreen').classList.remove('hidden');
+});
+document.getElementById('skinsBackBtn').addEventListener('click', ()=>{
+  document.getElementById('skinsScreen').classList.add('hidden');
+});
+document.getElementById('caseBtn').addEventListener('click', openSkinCase);
 
 // ---------------------------------------------------------------------------
 // AUDIO (procedural, no external assets)
@@ -4419,7 +4543,7 @@ function damageEnemy(enemy, amount, byPid){
     if(enemy.isZombie){
       // points instead of a weapon drop - a knife pickup off every zombie
       // would be pointless clutter, and points are the whole point of the mode
-      awardZombiePoints(byPid, 60);
+      awardZombiePoints(byPid, 60, 1); // +1 persistent credit per zombie kill (not hits) - see SKIN CASES
       // 1/3 of kills also drop a resupply - stim or ammo, split evenly
       if(Math.random() < 1/3){
         const kind = Math.random() < 0.5 ? 'stim' : 'ammo';
@@ -4464,9 +4588,15 @@ function damageEnemy(enemy, amount, byPid){
 // (the host's own shot), or a specific connected guest via a direct
 // message, since zombiePoints is a purely local/per-client wallet, not
 // synced host state like kills/deaths
-function awardZombiePoints(byPid, amount){
-  if(byPid){ sendToGuest(byPid, {t:'zombiePoints', amount}); }
-  else { zombiePoints += amount; updateZombiePointsHUD(); }
+// creditAmount (optional) is the persistent skin-case currency (see SKIN
+// CASES) - separate from the per-match zombiePoints wallet, so it rides
+// along on the exact same message rather than needing its own
+function awardZombiePoints(byPid, amount, creditAmount){
+  if(byPid){ sendToGuest(byPid, {t:'zombiePoints', amount, credits:creditAmount||0}); }
+  else {
+    zombiePoints += amount; updateZombiePointsHUD();
+    if(creditAmount){ credits += creditAmount; saveSkins(); updateCreditsHUD(); }
+  }
 }
 
 // squad awareness: whoever spots (or gets shot by) the player calls it in -
@@ -5162,7 +5292,10 @@ function onNetMessage(msg){
       if(net.role==='guest') spawnPickup(msg.x, msg.z, msg.weaponType, msg.id, true, msg.kind);
       break;
     case 'pickupTaken': removePickupById(msg.id); break;        // co-op, relayed - whoever didn't grab it locally removes their copy
-    case 'zombiePoints': zombiePoints += msg.amount; updateZombiePointsHUD(); break; // host -> guest, zombie mode
+    case 'zombiePoints':
+      zombiePoints += msg.amount; updateZombiePointsHUD();
+      if(msg.credits){ credits += msg.credits; saveSkins(); updateCreditsHUD(); }
+      break; // host -> guest, zombie mode
     case 'zombieSpawnBatch':                                    // host -> guest, zombie mode - a wave's trickle-in batch, see updateZombieSpawnQueue
       msg.batch.forEach(b=>{
         const z = buildZombie(b.pos, msg.roundNum);
