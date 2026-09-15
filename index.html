@@ -285,6 +285,29 @@
     </button>
   </div>
 
+  <div id="pvpModeScreen" class="hidden">
+    <p style="margin:16px 0 8px;">SELECT PVP MODE</p>
+    <div id="modeGrid">
+      <button class="modeCard" data-pvpmode="FFA" style="--swatch:#c23b2f">
+        <span class="modeCardName">FREE-FOR-ALL</span>
+        <span class="modeCardDesc">Every player for themselves. First to 20 kills wins.</span>
+      </button>
+      <button class="modeCard" data-pvpmode="DEATHMATCH" style="--swatch:#a83c2c">
+        <span class="modeCardName">TEAM DEATHMATCH</span>
+        <span class="modeCardDesc">RED vs BLUE. First team to 30 combined kills wins.</span>
+      </button>
+      <button class="modeCard" data-pvpmode="GUNGAME" style="--swatch:#8a6a2e">
+        <span class="modeCardName">GUN GAME</span>
+        <span class="modeCardDesc">Every kill advances your loadout. First to a knife kill on the final tier wins.</span>
+      </button>
+      <button class="modeCard" data-pvpmode="SND" style="--swatch:#2e6e5a">
+        <span class="modeCardName">SEARCH &amp; DESTROY</span>
+        <span class="modeCardDesc">RED plants, BLUE defuses. One life per round, first to 6 round wins.</span>
+      </button>
+    </div>
+    <button id="backBtn3">&larr; back</button>
+  </div>
+
   <div id="joinPanel" class="hidden" style="margin-top:24px;">
     <div id="joinRow">
       <input id="joinCodeInput" placeholder="CODE" maxlength="5">
@@ -350,7 +373,7 @@
 
 <div id="weaponSelectScreen" class="hidden">
   <h1>BREACH <span>PROTOCOL</span></h1>
-  <p>SELECT LOADOUT</p>
+  <p id="weaponSelectSub">SELECT LOADOUT</p>
   <div id="teamRow">
     <button class="teamBtn active" data-team="">NO TEAM</button>
     <button class="teamBtn" data-team="RED">RED</button>
@@ -3186,6 +3209,7 @@ function updateInventoryHUD(){
 }
 function switchToSlot(slot){
   if(playerDead || !engaged) return;
+  if(net.mode==='pvp' && net.pvpMode==='GUNGAME') return; // locked to the current tier - see checkGunGameProgress
   const type = inventory[slot];
   if(!type || type===currentWeapon.key) return;
   equipWeapon(type);
@@ -3652,6 +3676,7 @@ function netSendStats(){
   net.players.forEach((p, pid)=>{ guestStats[pid] = { kills:p.kills, deaths:p.deaths, assists:p.assists }; });
   netSend({ t:'stats', hostKills:net.hostKills, hostDeaths:net.hostDeaths, hostAssists:net.hostAssists, guestStats });
   updateScoreboard();
+  checkGunGameProgress(); // the host is a player too - its own kills can advance its own tier
 }
 // byPid: omitted/undefined when the HOST's own shot did it; a guest's pid
 // string when that guest reported the hit (see onGuestMessage's 'hitEnemy')
@@ -4054,6 +4079,7 @@ function attemptEnemyShot(en, distance, target){
 const MAX_GUESTS = 4; // up to 5 players total (host + this many guests), either mode
 const net = {
   mode: 'solo',            // 'solo' | 'coop' | 'pvp'
+  pvpMode: 'FFA',           // 'FFA' | 'DEATHMATCH' | 'GUNGAME' | 'SND' - only meaningful when mode==='pvp'
   role: null,               // 'host' | 'guest' | null
   myPid: null,               // this client's own id: 'host', or 'p1'..'p4' for a guest
   peer: null, conn: null, connected: false,
@@ -4278,7 +4304,7 @@ function wireGuestConnection(pid, conn){
   conn.on('open', ()=>{
     net.connected = true;
     clearTimeout(net.connectTimeoutId);
-    conn.send({t:'welcome', pid, mode:net.mode});
+    conn.send({t:'welcome', pid, mode:net.mode, pvpMode:net.pvpMode});
     renderLobbyRoster();
   });
   conn.on('data', msg=> onGuestMessage(pid, msg));
@@ -4350,8 +4376,8 @@ function wireConnection(onOpen){
 function onNetMessage(msg){
   if(!msg || !msg.t) return;
   switch(msg.t){
-    case 'mode': netOnModeChosen(msg.mode); break;
-    case 'welcome': net.myPid = msg.pid; break;                // host -> guest, co-op: this client's assigned id
+    case 'mode': netOnModeChosen(msg.mode, msg.pvpMode); break;
+    case 'welcome': net.myPid = msg.pid; if(msg.pvpMode) net.pvpMode = msg.pvpMode; break; // host -> guest, co-op: this client's assigned id
     case 'full': setNetStatus('That game is already full or in progress.', true); break; // host -> guest, co-op
     case 'roundInit': netApplyRoundInit(msg); break;            // host -> guest, co-op
     case 'pvpInit': netApplyPvpInit(msg); break;                // host -> guest, pvp
@@ -4368,6 +4394,7 @@ function onNetMessage(msg){
     case 'squadCleared': netApplySquadCleared(); break;         // host -> guest, co-op
     case 'hitPlayer': netApplyPvpHit(msg.dmg, msg.fromPid); break; // pvp - addressed to ME specifically (direct from host, or relayed)
     case 'killFeed': addKillFeedEntry(msg.killerName, msg.victimName); break; // host -> guest, pvp
+    case 'pvpMatchEnd': pvpMatchOver = true; showPvpMatchEnd(msg.label); break; // host -> guest, pvp
 
     case 'ping': netSend({t:'pong', ts: msg.ts}); break;
     case 'pong': net.rtt = Math.round(performance.now() - msg.ts); break;
@@ -4425,13 +4452,15 @@ function onGuestMessage(pid, msg){
       else { const killer = net.players.get(msg.killerPid); if(killer) killer.kills++; }
       netSendStats();
       netBroadcastKillFeed(msg.killerPid, pid);
+      checkPvpWinCondition();
       break;
     }
   }
 }
 
-function netOnModeChosen(mode){
+function netOnModeChosen(mode, pvpMode){
   net.mode = mode;
+  if(pvpMode) net.pvpMode = pvpMode;
   document.getElementById('connectScreen').classList.add('hidden');
   showOverlay('BREACH <span>PROTOCOL</span>', (mode==='pvp'?'PVP':'CO-OP')+' - WAITING FOR HOST', 'STANDBY', false);
 }
@@ -4660,6 +4689,82 @@ function netApplyStats(msg){
     p.kills = s.kills; p.deaths = s.deaths; p.assists = s.assists;
   });
   updateScoreboard();
+  checkGunGameProgress(); // a stats update might be MY kill count moving up a gun-game tier
+}
+
+// ---------------------------------------------------------------------------
+// PVP GAME MODES - FFA/DEATHMATCH/GUNGAME share the existing continuous-
+// respawn PvP structure and just add a win condition (+ GUNGAME's per-kill
+// weapon progression) on top of it; SEARCH & DESTROY is a separate round
+// structure entirely (see below).
+// ---------------------------------------------------------------------------
+const PVP_FFA_KILL_TARGET = 20;
+const PVP_DEATHMATCH_TEAM_TARGET = 30;
+const GUNGAME_SEQUENCE = ['PISTOL','SMG','SHOTGUN','AR','SNIPER','MINIGUN','KNIFE'];
+function gunGameTierFor(kills){ return GUNGAME_SEQUENCE[Math.min(kills, GUNGAME_SEQUENCE.length-1)]; }
+// runs on every client (host and each guest independently) whenever a
+// stats update lands - each player advances their OWN weapon the instant
+// their OWN kill count crosses into a new tier, regardless of who's
+// currently hosting or who got the kill that triggered this stats sync
+function checkGunGameProgress(){
+  if(net.mode!=='pvp' || net.pvpMode!=='GUNGAME' || playerDead || pvpMatchOver) return;
+  const kills = myStats().kills;
+  const tier = gunGameTierFor(kills);
+  if(tier !== currentWeapon.key) equipWeapon(tier);
+}
+// host-only: called right after every PvP kill is credited (both death
+// paths - see onGuestMessage's 'pvpDeath' and netApplyPvpHit's host
+// branch) to check whether that kill just won the match
+let pvpMatchOver = false;
+function checkPvpWinCondition(){
+  if(net.role!=='host' || net.mode!=='pvp' || pvpMatchOver) return;
+  if(net.pvpMode==='FFA' || net.pvpMode==='GUNGAME'){
+    const target = net.pvpMode==='FFA' ? PVP_FFA_KILL_TARGET : GUNGAME_SEQUENCE.length;
+    if(net.hostKills>=target){ declarePvpMatchWinner(playerDisplayName('host')); return; }
+    for(const [pid,p] of net.players) if(p.kills>=target){ declarePvpMatchWinner(playerDisplayName(pid)); return; }
+  } else if(net.pvpMode==='DEATHMATCH'){
+    // team totals - a player's team lives in their own xf broadcast
+    // (net.players' own fields never carry it), the host's own team is
+    // just myTeam locally
+    let redKills=0, blueKills=0;
+    if(myTeam==='RED') redKills+=net.hostKills; else if(myTeam==='BLUE') blueKills+=net.hostKills;
+    net.players.forEach(p=>{
+      const t = p.lastXf && p.lastXf.team;
+      if(t==='RED') redKills+=p.kills; else if(t==='BLUE') blueKills+=p.kills;
+    });
+    if(redKills>=PVP_DEATHMATCH_TEAM_TARGET){ declarePvpMatchWinner('RED TEAM'); return; }
+    if(blueKills>=PVP_DEATHMATCH_TEAM_TARGET){ declarePvpMatchWinner('BLUE TEAM'); return; }
+  }
+}
+function declarePvpMatchWinner(label){
+  pvpMatchOver = true;
+  netSend({t:'pvpMatchEnd', label});
+  showPvpMatchEnd(label);
+}
+// simplest clean way to fully tear down PeerJS/game state and land
+// everyone back at the connect screen after a match - every other option
+// means carefully unwinding dozens of pieces of network/round state by
+// hand, with a much higher chance of leaving something stale behind
+function showPvpMatchEnd(label){
+  showOverlay('MATCH <span>OVER</span>', label+' WINS', 'RETURNING TO MENU', false, false);
+  setTimeout(()=> location.reload(), 6000);
+}
+// team play only makes sense for the modes that actually score by team
+// (deathmatch and, later, S&D's attack/defend sides) - hidden for FFA/gun
+// game so the loadout screen doesn't imply a choice that does nothing
+function updateWeaponSelectScreenText(){
+  const sub = document.getElementById('weaponSelectSub');
+  const teamRow = document.getElementById('teamRow');
+  if(net.pvpMode==='GUNGAME'){
+    sub.textContent = 'GUN GAME - CLICK ANY CARD TO START AT PISTOL';
+    teamRow.classList.add('hidden');
+  } else if(net.pvpMode==='DEATHMATCH'){
+    sub.textContent = 'SELECT LOADOUT';
+    teamRow.classList.remove('hidden');
+  } else {
+    sub.textContent = 'SELECT LOADOUT';
+    teamRow.classList.add('hidden');
+  }
 }
 
 // ---- co-op: round/map mirroring + enemy puppets on the guest ----
@@ -4814,6 +4919,7 @@ function netApplyPvpInit(msg){
   // pvpRespawnLocal/engageGame call happens from the weaponCard click
   // handler below, since (same reasoning as netApplyRoundInit) pointer
   // lock can only be requested from a real click, not a message handler
+  updateWeaponSelectScreenText();
   document.getElementById('weaponSelectScreen').classList.remove('hidden');
 }
 // up to 5 players split across the map's two named spawns (still as far
@@ -4867,6 +4973,7 @@ function netApplyPvpHit(dmg, fromPid){
       if(fromPid && fromPid!=='host'){ const k=net.players.get(fromPid); if(k) k.kills++; }
       netSendStats();
       netBroadcastKillFeed(fromPid, 'host');
+      checkPvpWinCondition();
     } else {
       netSend({t:'pvpDeath', killerPid: fromPid});
     }
@@ -5196,7 +5303,21 @@ document.getElementById('soloBtn').addEventListener('click', ()=>{
   document.getElementById('mapSelectScreen').classList.remove('hidden');
 });
 document.getElementById('coopBtn').addEventListener('click', ()=> hostGame('coop'));
-document.getElementById('pvpBtn').addEventListener('click', ()=> hostGame('pvp'));
+document.getElementById('pvpBtn').addEventListener('click', ()=>{
+  document.getElementById('modeGrid').classList.add('hidden');
+  document.getElementById('pvpModeScreen').classList.remove('hidden');
+});
+document.querySelectorAll('#pvpModeScreen [data-pvpmode]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    net.pvpMode = btn.dataset.pvpmode;
+    document.getElementById('pvpModeScreen').classList.add('hidden');
+    hostGame('pvp');
+  });
+});
+document.getElementById('backBtn3').addEventListener('click', ()=>{
+  document.getElementById('pvpModeScreen').classList.add('hidden');
+  document.getElementById('modeGrid').classList.remove('hidden');
+});
 document.getElementById('joinBtn').addEventListener('click', ()=>{
   document.getElementById('modeGrid').classList.add('hidden');
   document.getElementById('joinPanel').classList.remove('hidden');
@@ -5227,7 +5348,7 @@ document.getElementById('startCoopBtn').addEventListener('click', ()=>{
   document.getElementById('connectScreen').classList.add('hidden');
   document.getElementById('mapSelectScreen').classList.remove('hidden');
   document.getElementById('mapSelectSub').textContent = net.mode==='pvp' ? 'SELECT ARENA - PVP' : 'SELECT INSERTION POINT - CO-OP';
-  netSend({t:'mode', mode:net.mode}); // tell every connected guest we're underway
+  netSend({t:'mode', mode:net.mode, pvpMode:net.pvpMode}); // tell every connected guest we're underway
 });
 
 // map select: picking a card both chooses the starting map and serves as
@@ -5248,6 +5369,7 @@ document.querySelectorAll('#mapGrid .mapCard').forEach(btn=>{
       net.players.forEach(p=>{ p.kills=0; p.deaths=0; p.assists=0; });
       netSendStats();
       netSend({t:'pvpInit', mapIndex: currentMapIndex}); // reaches every connected guest
+      updateWeaponSelectScreenText();
       document.getElementById('weaponSelectScreen').classList.remove('hidden'); // own loadout pick, then weaponCard's click engages
       return;
     }
@@ -5279,7 +5401,13 @@ document.querySelectorAll('.teamBtn').forEach(btn=>{
 });
 document.querySelectorAll('#weaponGrid .mapCard').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    equipWeapon(btn.dataset.weapon);
+    // gun game forces the weapon to whatever tier this player's kill count
+    // has already earned (tier 0/PISTOL at match start, same as always
+    // since kills start at 0) regardless of which card was clicked - death
+    // doesn't reset progress, only kills advance it (see
+    // checkGunGameProgress). The click still just serves as the real user
+    // gesture engageGame()'s pointer lock request needs.
+    equipWeapon(net.pvpMode==='GUNGAME' ? gunGameTierFor(myStats().kills) : btn.dataset.weapon);
     document.getElementById('weaponSelectScreen').classList.add('hidden');
     pvpRespawnLocal(false);
     engageGame();
