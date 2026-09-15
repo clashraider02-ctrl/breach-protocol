@@ -299,6 +299,8 @@
   <div id="dmgFlash"></div>
 </div>
 
+<audio id="menuMusic" src="menu-music.mp3" loop preload="auto"></audio>
+
 <div id="connectScreen">
   <h1>BREACH <span>PROTOCOL</span></h1>
   <p>SELECT MODE</p>
@@ -1221,59 +1223,40 @@ function playHurt(){
   src.connect(filt); filt.connect(g); g.connect(ctx.destination); src.start();
 }
 
-// low, moody ambient pad for the menu screens (connect/map/weapon select) -
-// a few slowly-detuned oscillators through a soft lowpass, with a slow LFO
-// breathing the filter so it doesn't sit static. Procedural like every
-// other sound here, no external audio file. Runs from the first user
-// gesture (browsers block audio before one) until the match actually
-// starts (see engageGame).
-let menuMusicNodes = null;
+// menu track for the menu screens (connect/map/weapon select) - a real
+// audio file (menu-music.mp3, alongside index.html), the one asset this
+// otherwise fully procedural/self-contained file needs. Runs from the
+// first user gesture (browsers block audio before one) until the match
+// actually starts (see engageGame). Volume fades in/out by hand-stepping
+// .volume on an interval, since HTMLMediaElement has no built-in ramp.
+const MENU_MUSIC_VOLUME = 0.35;
+let menuMusicFade = null;
+function fadeMenuMusicTo(target, ms, onDone){
+  const el = document.getElementById('menuMusic');
+  clearInterval(menuMusicFade);
+  const start = el.volume, steps = Math.max(1, Math.round(ms/50)), stepAmt = (target-start)/steps;
+  let i = 0;
+  menuMusicFade = setInterval(()=>{
+    i++;
+    el.volume = Math.max(0, Math.min(1, start + stepAmt*i));
+    if(i>=steps){ clearInterval(menuMusicFade); menuMusicFade=null; if(onDone) onDone(); }
+  }, 50);
+}
+let menuMusicPlaying = false;
 function startMenuMusic(){
-  if(menuMusicNodes) return;
-  const ctx = audio();
-  const master = ctx.createGain();
-  master.gain.value = 0;
-  master.connect(ctx.destination);
-  master.gain.linearRampToValueAtTime(0.09, ctx.currentTime + 2.5);
-
-  const filt = ctx.createBiquadFilter();
-  filt.type = 'lowpass';
-  filt.frequency.value = 420;
-  filt.connect(master);
-
-  const lfo = ctx.createOscillator();
-  lfo.frequency.value = 0.06;
-  const lfoGain = ctx.createGain();
-  lfoGain.gain.value = 140;
-  lfo.connect(lfoGain);
-  lfoGain.connect(filt.frequency);
-  lfo.start();
-
-  // a low root + two slightly-detuned partners (a fifth and an octave) so
-  // it reads as a sustained chord, not one flat tone
-  const oscs = [55, 82.5, 110].map(freq=>{
-    const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.value = freq;
-    o.connect(filt);
-    o.start();
-    return o;
-  });
-
-  menuMusicNodes = { master, filt, lfo, oscs };
+  if(menuMusicPlaying) return;
+  menuMusicPlaying = true;
+  const el = document.getElementById('menuMusic');
+  el.volume = 0;
+  el.currentTime = 0;
+  el.play().catch(()=>{}); // best-effort - if the browser still blocks it, the menu is silent rather than broken
+  fadeMenuMusicTo(MENU_MUSIC_VOLUME, 2000);
 }
 function stopMenuMusic(){
-  if(!menuMusicNodes) return;
-  const { master, lfo, oscs } = menuMusicNodes;
-  const ctx = audio();
-  master.gain.cancelScheduledValues(ctx.currentTime);
-  master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
-  master.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.8);
-  setTimeout(()=>{
-    oscs.forEach(o=> o.stop());
-    lfo.stop();
-  }, 900);
-  menuMusicNodes = null;
+  if(!menuMusicPlaying) return;
+  menuMusicPlaying = false;
+  const el = document.getElementById('menuMusic');
+  fadeMenuMusicTo(0, 600, ()=> el.pause());
 }
 
 // ---------------------------------------------------------------------------
