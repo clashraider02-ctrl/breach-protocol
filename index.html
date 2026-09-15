@@ -4138,7 +4138,7 @@ function difficultyForRound(roundN){
 let currentDifficulty = difficultyForRound(1);
 
 let roundNum = 1;
-function spawnRound(){
+function spawnRound(nextRound){
   ensureMap(); // rebuilds the level geometry when the 5-round map cycle advances
 
   enemies.forEach(en=> enemyGroup.remove(en.group));
@@ -4187,7 +4187,7 @@ function spawnRound(){
 
   if(net.role==='host' && net.mode==='coop'){
     net.players.forEach(p=>{ p.health = 100; p.dead = false; });
-    netSend({ t:'roundInit', mapIndex: currentMapIndex, roundNum, enemyWeapons: enemies.map(en=>en.weapon), zombieMode: isZombieMode(), enemyPos: isZombieMode() ? enemies.map(en=>[en.group.position.x, en.group.position.z]) : undefined });
+    netSend({ t:'roundInit', mapIndex: currentMapIndex, roundNum, enemyWeapons: enemies.map(en=>en.weapon), zombieMode: isZombieMode(), enemyPos: isZombieMode() ? enemies.map(en=>[en.group.position.x, en.group.position.z]) : undefined, nextRound });
   }
 }
 
@@ -5571,6 +5571,7 @@ function coopGuestSpawnPos(){
   return [sx, sz]; // every offset blocked - fall back to the host's exact spot rather than somewhere unvalidated
 }
 function netApplyRoundInit(msg){
+  const mapBefore = currentMapIndex;
   ensureMap(msg.mapIndex);
   document.getElementById('roundNum').textContent = msg.roundNum;
   clearNetPuppets();
@@ -5601,10 +5602,17 @@ function netApplyRoundInit(msg){
   document.getElementById('spectateBanner').classList.add('hidden');
   updateHealthHUD();
   equipWeapon(currentWeapon.key); // refill ammo for a new round - the host does this via resetRound()'s equipWeapon() call, but this guest-side round transition never went through that, so ammo/reserve just carried over depleted from whatever they ended the last round with
-  const sp = coopGuestSpawnPos();
-  yawObject.position.set(sp[0], EYE_STAND, sp[1]);
-  yaw = 0; pitch = 0; leanState = 0; crouchToggled = false;
-  jumping = false; jumpVel = 0; jumpOffset = 0; groundFollowY = EYE_STAND;
+  // mirrors resetRound()'s own skip-teleport logic (see there) - a zombie
+  // wave that stayed on the same map flows straight into the next one from
+  // wherever this guest is already standing, instead of snapping back to a
+  // fresh spawn point on every single roundInit
+  const skipTeleport = msg.nextRound && msg.zombieMode && currentMapIndex===mapBefore;
+  if(!skipTeleport){
+    const sp = coopGuestSpawnPos();
+    yawObject.position.set(sp[0], EYE_STAND, sp[1]);
+    yaw = 0; pitch = 0; leanState = 0; crouchToggled = false;
+    jumping = false; jumpVel = 0; jumpOffset = 0; groundFollowY = EYE_STAND;
+  }
   document.getElementById('mapName').textContent = activeMap.name;
   // engageGame() requests real mouse capture (pointer lock), which browsers
   // only grant from a genuine, synchronous user click - calling it here
@@ -6062,10 +6070,20 @@ function resetRound(nextRound){
   // mode, since currentWeapon hasn't changed yet at that point.
   equipWeapon(isZombieMode() ? currentWeapon.key : (nextRound ? weaponForRound(roundNum) : currentWeapon.key));
   updateHealthHUD();
-  spawnRound(); // may switch maps first, so activeMap.spawn below is current
-  yawObject.position.set(activeMap.spawn[0], EYE_STAND, activeMap.spawn[1]);
-  yaw = 0; pitch = 0; leanState = 0; crouchToggled = false;
-  jumping = false; jumpVel = 0; jumpOffset = 0; groundFollowY = EYE_STAND;
+  const mapBefore = currentMapIndex;
+  spawnRound(nextRound); // may switch maps first, so activeMap.spawn below is current
+  // zombies: a cleared wave flows straight into the next one from wherever
+  // the player's already standing, instead of teleporting back to the map's
+  // spawn point every time - "rounds, not waves" per the request. Only an
+  // actual death retry (nextRound=false) or a wave boundary that also rolls
+  // the map (every 5th wave, same cadence as every other mode) still needs
+  // a real reposition onto valid ground.
+  const skipTeleport = nextRound && isZombieMode() && currentMapIndex===mapBefore;
+  if(!skipTeleport){
+    yawObject.position.set(activeMap.spawn[0], EYE_STAND, activeMap.spawn[1]);
+    yaw = 0; pitch = 0; leanState = 0; crouchToggled = false;
+    jumping = false; jumpVel = 0; jumpOffset = 0; groundFollowY = EYE_STAND;
+  }
   engageGame();
 }
 
