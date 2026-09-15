@@ -2963,14 +2963,22 @@ function zombieBoxLabelTexture(){
   return _zombieBoxLabelTex;
 }
 // a mounted weapon plate against the wall - fixed, always the same gun,
-// unlike the box's random gamble
+// unlike the box's random gamble. Backed by a per-weapon accent-colored
+// outline frame (thinner than the plate, so it shows as a border rather
+// than z-fighting it) plus a matching glow and label tint, so which gun
+// this is reads at a glance from across a room, not just up close on the
+// label text
 function buildWallGunMarker(x, z, def){
+  const outlineMat = new THREE.MeshStandardMaterial({ color:0x0a0a0a, emissive:def.accent, emissiveIntensity:1.1, roughness:0.4, metalness:0.3 });
+  const outline = new THREE.Mesh(new THREE.BoxGeometry(1.05, 1.45, 0.06), outlineMat);
+  outline.position.set(x, 0.75, z);
+  mapGroup.add(outline);
   const plateMat = new THREE.MeshStandardMaterial({ color:0x3a4650, emissive:0x14181c, emissiveIntensity:0.6, roughness:0.5, metalness:0.6 });
   const plate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.3, 0.12), plateMat);
   plate.position.set(x, 0.75, z);
   plate.castShadow = true;
   mapGroup.add(plate);
-  const light = new THREE.PointLight(0x6fa8dc, 1.2, 5);
+  const light = new THREE.PointLight(def.accent, 1.3, 5);
   light.position.set(x, 1.3, z);
   mapGroup.add(light);
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ map:wallGunLabelTexture(def), transparent:true, depthWrite:false }));
@@ -2985,7 +2993,7 @@ function wallGunLabelTexture(def){
   const ctx = c.getContext('2d');
   ctx.font = '700 34px "Rajdhani", sans-serif';
   ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillStyle = '#cfe0ea';
+  ctx.fillStyle = '#'+def.accent.toString(16).padStart(6,'0');
   ctx.fillText(WEAPONS[def.weapon].label+' - '+def.cost, 128, 32);
   _wallGunLabelTex[def.weapon] = new THREE.CanvasTexture(c);
   return _wallGunLabelTex[def.weapon];
@@ -4170,9 +4178,13 @@ function showZombieBoxBanner(text){
 // hide/show logic depend on the other's, which isn't worth the fragility.
 // Buying a weapon already held just tops off its ammo, the same as any
 // other re-equip - a legitimate "wall-buy ammo" use, not a guarded-against edge case.
+// accent: a bright per-gun outline/glow color, distinct from the weapon's
+// own (dark, meant-for-a-view-model) fill color - lets a wall gun read as
+// "which gun is this" from across a room, at a glance, before the label
+// text is even legible, same idea as a real wall-buy's backlit silhouette
 const WALL_GUN_DEFS = [
-  { weapon:'SMG', cost:500, spawnIdx:1 },
-  { weapon:'AR', cost:1200, spawnIdx:3 },
+  { weapon:'SMG', cost:500, spawnIdx:1, accent:0x5fd97a },
+  { weapon:'AR', cost:1200, spawnIdx:3, accent:0xe0893c },
 ];
 const WALL_GUN_RADIUS = 2;
 const WALL_GUN_HOLD_TIME = 1.2;
