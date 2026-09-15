@@ -3530,6 +3530,8 @@ function spawnPickup(x, z, weaponType, id, fromNet, kind){
   if(id==null) id = 'pk'+(pickupIdCounter++);
   const mat = kind==='stim'
     ? new THREE.MeshStandardMaterial({ color:0x4fd67a, roughness:0.3, metalness:0.3, emissive:0x1c5c33, emissiveIntensity:0.6 })
+    : kind==='ammo'
+    ? new THREE.MeshStandardMaterial({ color:0xd9a53c, roughness:0.3, metalness:0.4, emissive:0x6b4f12, emissiveIntensity:0.6 })
     : new THREE.MeshStandardMaterial({ color: WEAPONS[weaponType].color, roughness:0.4, metalness:0.5, emissive:0x1a1206, emissiveIntensity:0.4 });
   const mesh = new THREE.Mesh(kind==='stim' ? stimGeo : pickupGeo, mat);
   mesh.position.set(x, 0.42, z);
@@ -3574,6 +3576,18 @@ function updatePickups(dt){
           playerHealth = Math.min(TARGET_HEALTH, playerHealth + STIM_HEAL);
           updateHealthHUD();
         }
+      } else if(p.kind==='ammo'){
+        // "max ammo" style - tops off every owned weapon's reserve (via the
+        // inventory ammo cache), not just whichever one is equipped right
+        // now, same as the genre convention this is modeled on
+        ammoInMag = currentWeapon.magSize;
+        ammoReserve = currentWeapon.reserveMax;
+        ammoState[currentWeapon.key] = { mag: ammoInMag, reserve: ammoReserve };
+        Object.keys(ammoState).forEach(key=>{
+          if(key===currentWeapon.key) return;
+          ammoState[key] = { mag: WEAPONS[key].magSize, reserve: WEAPONS[key].reserveMax };
+        });
+        updateAmmoHUD();
       } else {
         equipWeapon(p.weaponType);
       }
@@ -3752,6 +3766,16 @@ const ZOMBIE_BOX_HOLD_TIME = 1.5;
 window.addEventListener('keydown', e=>{ if(e.code==='KeyF') zombieBoxKeyDown=true; });
 window.addEventListener('keyup', e=>{ if(e.code==='KeyF') zombieBoxKeyDown=false; });
 
+// a wave doesn't spawn all at once - it trickles in ZOMBIE_SPAWN_BATCH at a
+// time, ZOMBIE_SPAWN_INTERVAL seconds apart, host-authoritative (see
+// updateZombieSpawnQueue/spawnRound's zombie branch). Every zombie's netId
+// is assigned up front for the whole wave so host/guest agree on it
+// regardless of when it actually spawns.
+let zombieSpawnQueue = []; // {pos:[x,z], netId} for zombies not yet spawned this wave
+let zombieSpawnTimer = 0;
+const ZOMBIE_SPAWN_BATCH = 5;
+const ZOMBIE_SPAWN_INTERVAL = 5;
+
 // a zombie is a buildEnemy() rig (same limbs/hit meshes/damage handling as
 // every armed bot) with the gun silhouette hidden, tinted decayed green,
 // and driven by updateZombie instead of updateEnemy
@@ -3872,20 +3896,29 @@ function spawnRound(){
   currentDifficulty = difficultyForRound(roundNum);
 
   const templates = activeMap.enemyTemplates;
+  zombieSpawnQueue = []; zombieSpawnTimer = ZOMBIE_SPAWN_INTERVAL;
   if(isZombieMode()){
     // endless escalating horde - starts at 6, +3 every wave, capped well
     // below anything that would tank framerate. Cycles through the map's
     // validated enemy-spawn points (safe for any count via modulo, unlike
     // a normal round which is hard-capped at templates.length) rather than
-    // needing a dedicated zombie-spawn dataset.
+    // needing a dedicated zombie-spawn dataset. Trickles in
+    // ZOMBIE_SPAWN_BATCH at a time instead of the whole wave appearing at
+    // once - the first batch spawns immediately here, the rest queue up
+    // for updateZombieSpawnQueue to release over time.
     const count = Math.min(30, 6 + (roundNum-1)*3);
+    const positions = [];
     for(let i=0;i<count;i++){
       const t = templates[i % templates.length];
-      const jitter = [t.pos[0]+(Math.random()-0.5)*2, t.pos[1]+(Math.random()-0.5)*2];
-      const z = buildZombie(jitter, roundNum);
+      positions.push([t.pos[0]+(Math.random()-0.5)*2, t.pos[1]+(Math.random()-0.5)*2]);
+    }
+    const firstBatch = Math.min(ZOMBIE_SPAWN_BATCH, count);
+    for(let i=0;i<firstBatch;i++){
+      const z = buildZombie(positions[i], roundNum);
       z.netId = i;
       enemies.push(z);
     }
+    for(let i=firstBatch;i<count;i++) zombieSpawnQueue.push({ pos: positions[i], netId: i });
   } else {
     // +1 bot every 2 rounds (was capped at +2/round-3, which every map's old
     // 5-template roster maxed out immediately) - now rides each map's larger
@@ -3910,6 +3943,26 @@ function spawnRound(){
 function updateEnemyCountHUD(){
   const alive = enemies.filter(e=>e.state!=='DEAD').length;
   document.getElementById('enemyCount').textContent = 'HOSTILES: '+alive;
+}
+// host-only, called every frame - releases the next batch of a zombie
+// wave's still-queued spawns on a timer (see spawnRound's zombie branch
+// for the initial batch). Solo zombie play still goes through
+// net.role==='host' (HOST ZOMBIES always uses hostGame('coop'), even with
+// zero guests connected), so this runs there too, just with the
+// broadcast being a no-op (netSend is already a no-op with nobody to send to).
+function updateZombieSpawnQueue(dt){
+  if(net.role!=='host' || !isZombieMode() || zombieSpawnQueue.length===0) return;
+  zombieSpawnTimer -= dt;
+  if(zombieSpawnTimer>0) return;
+  zombieSpawnTimer = ZOMBIE_SPAWN_INTERVAL;
+  const batch = zombieSpawnQueue.splice(0, ZOMBIE_SPAWN_BATCH);
+  batch.forEach(b=>{
+    const z = buildZombie(b.pos, roundNum);
+    z.netId = b.netId;
+    enemies.push(z);
+  });
+  updateEnemyCountHUD();
+  if(net.mode==='coop') netSend({ t:'zombieSpawnBatch', batch, roundNum });
 }
 
 // broadcasts the scoreboard to every connected guest - called from every
@@ -3956,6 +4009,11 @@ function damageEnemy(enemy, amount, byPid){
       // points instead of a weapon drop - a knife pickup off every zombie
       // would be pointless clutter, and points are the whole point of the mode
       awardZombiePoints(byPid, 60);
+      // 1/3 of kills also drop a resupply - stim or ammo, split evenly
+      if(Math.random() < 1/3){
+        const kind = Math.random() < 0.5 ? 'stim' : 'ammo';
+        spawnPickup(enemy.group.position.x, enemy.group.position.z, null, null, false, kind);
+      }
     } else {
       spawnPickup(enemy.group.position.x, enemy.group.position.z, enemy.weapon);
       // about 1/3 of kills also drop a stim, offset a bit so it doesn't sit
@@ -4103,7 +4161,12 @@ function checkRoundClear(){
   // the survivors can clear a round on their own and revive everyone else
   // for the next one.
   const failed = (net.mode==='coop' && net.role==='host') ? checkSquadWipe() : playerDead;
-  if(enemies.every(e=>e.state==='DEAD') && !failed){
+  // zombie mode: a wave isn't actually cleared just because every zombie
+  // currently on the field is dead - more of the wave might still be
+  // queued to trickle in (see updateZombieSpawnQueue). A lull with nobody
+  // alive on screen while the next batch's timer counts down is expected.
+  const stillSpawning = isZombieMode() && zombieSpawnQueue.length>0;
+  if(enemies.every(e=>e.state==='DEAD') && !failed && !stillSpawning){
     roundCleared = true;
     document.getElementById('spectateBanner').classList.add('hidden');
     if(net.role==='host' && net.mode==='coop') netSend({t:'squadCleared'});
@@ -4667,6 +4730,17 @@ function onNetMessage(msg){
       break;
     case 'pickupTaken': removePickupById(msg.id); break;        // co-op, relayed - whoever didn't grab it locally removes their copy
     case 'zombiePoints': zombiePoints += msg.amount; updateZombiePointsHUD(); break; // host -> guest, zombie mode
+    case 'zombieSpawnBatch':                                    // host -> guest, zombie mode - a wave's trickle-in batch, see updateZombieSpawnQueue
+      msg.batch.forEach(b=>{
+        const z = buildZombie(b.pos, msg.roundNum);
+        z.netId = b.netId;
+        z.state = 'PATROL';
+        z._lastFireFlag = 0;
+        enemies.push(z);
+        net.puppets.set(b.netId, z);
+      });
+      updateEnemyCountHUD();
+      break;
     case 'playerLeft': netApplyPlayerLeft(msg.pid); break;      // host -> guest, both modes
     case 'squadDown': netApplySquadDown(); break;               // host -> guest, co-op
     case 'squadCleared': netApplySquadCleared(); break;         // host -> guest, co-op
@@ -5986,6 +6060,7 @@ function animate(){
   sndHostTick(dt);
   updateSndAction(dt);
   updateZombieBox(dt);
+  updateZombieSpawnQueue(dt);
   netTick(dt);
   updateMpHUD();
   checkPerfDowngrade(dt);
