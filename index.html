@@ -134,6 +134,19 @@
   .killFeedEntry b{ color:var(--caution); font-weight:700; }
   @keyframes killFeedFade{ 0%{opacity:0; transform:translateX(12px);} 8%{opacity:1; transform:translateX(0);} 80%{opacity:1;} 100%{opacity:0;} }
 
+  /* Search & Destroy - score/clock top center, a transient banner for
+     phase changes (plant/round result), and a hold-to-use progress bar
+     for planting/defusing */
+  #sndHud{ position:absolute; top:8px; left:50%; transform:translateX(-50%); text-align:center; pointer-events:none; }
+  #sndScore{ font-family:var(--font-display); font-weight:700; font-size:14px; letter-spacing:3px; color:var(--text); }
+  #sndClock{ font-family:var(--font-mono); font-size:22px; font-weight:700; color:var(--text-dim); font-variant-numeric:tabular-nums; }
+  #sndClock.fuse{ color:var(--danger); animation:pulse 1s infinite; }
+  #sndBanner{ position:absolute; top:70px; left:50%; transform:translateX(-50%); background:rgba(8,8,10,.85); border:1px solid var(--caution); color:var(--caution); font-family:var(--font-display); font-weight:700; font-size:16px; letter-spacing:3px; padding:8px 20px; pointer-events:none; }
+  #sndActionBar{ position:absolute; left:50%; bottom:130px; transform:translateX(-50%); width:220px; text-align:center; pointer-events:none; }
+  #sndActionBar .track{ width:100%; height:6px; background:rgba(0,0,0,.5); border:1px solid #3a3a3a; }
+  #sndActionBar .fill{ height:100%; background:var(--caution); width:0%; }
+  #sndActionBar .label{ margin-top:4px; font-family:var(--font-display); font-weight:600; font-size:11px; letter-spacing:2px; color:var(--caution); }
+
   /* lean tilt handled via camera roll, not css */
 
   #overlay{ position:fixed; inset:0; background:rgba(6,6,8,.94); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:20; cursor:pointer; text-align:center; }
@@ -250,6 +263,16 @@
   <div id="spectateBanner" class="hidden">YOU ARE DOWN &mdash; SPECTATING <span id="spectateTarget">YOUR SQUAD</span></div>
   <div id="killCamBanner" class="hidden">KILLCAM &mdash; <span id="killCamTarget">OPERATOR</span></div>
   <div id="killFeed"></div>
+
+  <div id="sndHud" class="hidden">
+    <div id="sndScore">RED 0 - 0 BLUE</div>
+    <div id="sndClock">1:30</div>
+  </div>
+  <div id="sndBanner" class="hidden"></div>
+  <div id="sndActionBar" class="hidden">
+    <div class="track"><div class="fill"></div></div>
+    <div class="label">PLANTING</div>
+  </div>
 
   <div id="controlsHelp">
     <div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div>
@@ -1986,6 +2009,10 @@ const MAPS = [
     // spawn2 above, [2..4] found by maximizing distance from every other
     // spawn and confirmed reachable by walk-simulation
     pvpSpawns: [[0,12],[-3,-15],[20.7,-3.8],[-21.3,0.2],[18.7,14.2]],
+    // Search & Destroy bomb site - found by spiraling out from the spawn/
+    // spawn2 midpoint for the nearest flat, unobstructed spot reachable
+    // from both, same validation as pvpSpawns
+    bombSite: {x:5.5, z:-1.5},
     ceilHeight: 7.5,
     // slightly bigger than the shared 44x34 footprint (see FACILITY) - the
     // boundary alone moved outward, every interior partition/crate/enemy/
@@ -2061,6 +2088,7 @@ const MAPS = [
     spawn2: [3, -15],
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,12],[3,-15],[-21.3,-3.8],[20.7,0.2],[-19.3,14.2]],
+    bombSite: {x:-10.6, z:5.5}, // Search & Destroy - see SANDSTONE's note
     ceilHeight: 7.5,
     // slightly bigger than the shared 44x34 footprint - see the matching
     // note on SANDSTONE. Same boundary-only change, same diff-verified
@@ -2128,6 +2156,7 @@ const MAPS = [
     spawn2: [-3, -15],
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,16],[-3,-15],[15.7,-1.3],[-18.3,4.7],[17.7,12.7]],
+    bombSite: {x:10.5, z:0.5}, // Search & Destroy - see SANDSTONE's note
     ceilHeight: 7.5,
     tint: { wall:0x8a7658, wall2:0x746146, floor:0x4a3f2e, crate:0x5c4632, ceil:0x241f18,
       indoorWall:0x6e5a3e, indoorFloor:0x4a3a26 },
@@ -2194,6 +2223,7 @@ const MAPS = [
     // plateau - pvpSpawnPos always drops the player at a fixed eye height,
     // so a spawn on either would place them floating or half-buried.
     pvpSpawns: [[0,30],[6,-26],[-30.3,-38.3],[27.7,5.7],[-30.3,17.7]],
+    bombSite: {x:3, z:2}, // Search & Destroy - see SANDSTONE's note
     tint: { wall:0xd6c9a3, wall2:0xa88b5c, floor:0xb5a488, crate:0x8a6a42, ceil:0xa8cfe0 },
     outerWalls: [
       [-22, 34, 24, 0.6], [22, 34, 24, 0.6], [0, 34, 20, 0.6], // solid south wall (T spawn is enclosed, no breach gap needed)
@@ -2330,6 +2360,7 @@ const MAPS = [
     spawn2: [25, 10],
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[-26,36],[25,10],[-1,-25],[3,29],[-1,3]],
+    bombSite: {x:-0.5, z:23}, // Search & Destroy - see SANDSTONE's note
     tint: { wall:0xac7f5a, wall2:0x8a6144, floor:0x8f7454, crate:0x6b4f34, ceil:0xcbd9e8,
       indoorWall:0x8a6a4a, indoorFloor:0x6b5138 },
     outerWalls: [
@@ -2409,6 +2440,7 @@ const MAPS = [
     spawn2: [-13, -14],
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,12],[-13,-14],[17.7,-9.3],[-18.3,4.7],[17.7,12.7]],
+    bombSite: {x:-1.5, z:-1}, // Search & Destroy - see SANDSTONE's note
     ceilHeight: 7.5,
     tint: { wall:0x5a5f45, wall2:0x4a4e38, floor:0x36382a, crate:0x6b6a30, ceil:0x1c1e16,
       indoorWall:0x726b3e, indoorFloor:0x494a32 },
@@ -2496,6 +2528,7 @@ const MAPS = [
     spawn2: [0, -32],
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,36],[0,-32],[-10,2],[10,-10],[10,14]],
+    bombSite: {x:0, z:2}, // Search & Destroy - see SANDSTONE's note
     tint: { wall:0x5c6670, wall2:0x3f4750, floor:0x53575c, crate:0xb5502a, ceil:0x9fc3dd,
       indoorWall:0x6b6f74, indoorFloor:0x484c50 },
     outerWalls: [
@@ -2563,6 +2596,7 @@ const MAPS = [
     spawn2: [0, -24],
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,24],[0,-24],[-25,-1],[25,-1],[-25,25]],
+    bombSite: {x:0, z:0}, // Search & Destroy - see SANDSTONE's note
     tint: { wall:0x7a7268, wall2:0x655e54, floor:0x59544a, crate:0x8a7a5c, ceil:0xb8c4cc,
       indoorWall:0x6e6558, indoorFloor:0x544e40 },
     outerWalls: [
@@ -2652,6 +2686,7 @@ const MAPS = [
     spawn2: [0, -42],
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,42],[0,-42],[-14,-1],[14,13],[12,-15]],
+    bombSite: {x:0, z:0}, // Search & Destroy - see SANDSTONE's note
     tint: { wall:0x4a5561, wall2:0x38414c, floor:0x494f54, crate:0x6b7278, ceil:0xaebfc9,
       indoorWall:0x565f68, indoorFloor:0x3d4247 },
     outerWalls: [
@@ -2729,6 +2764,39 @@ function buildMap(map){
   // the actual verticality/depth pass - raised rooms, stairs, tunnels,
   // angled cover - lives per-map right next to its layout data below
   if(map.buildVerticality) map.buildVerticality({ mat, mat2, brickMat, panelMat, tileMat, plankMat, floorMat, crateMat });
+  // Search & Destroy's bomb site marker - only relevant (and only drawn)
+  // in that specific pvp mode, so it doesn't clutter every other mode's
+  // view of the same map
+  if(map.bombSite && net.mode==='pvp' && net.pvpMode==='SND') buildBombSiteMarker(map.bombSite.x, map.bombSite.z);
+}
+// a flat glowing ring on the ground - purely decorative (no wallBoxes/
+// raycastMeshes registration), matching every other ground-level marker
+// in this file (e.g. RUINS' rubble clutter)
+function buildBombSiteMarker(x, z){
+  const ringMat = new THREE.MeshStandardMaterial({ color:0xc23b2f, emissive:0x5c1712, emissiveIntensity:0.8, roughness:0.6, transparent:true, opacity:0.85, side:THREE.DoubleSide });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(SND_SITE_RADIUS-0.15, SND_SITE_RADIUS, 32), ringMat);
+  ring.rotation.x = -Math.PI/2;
+  ring.position.set(x, 0.03, z);
+  mapGroup.add(ring);
+  // a sprite always faces the camera regardless of its own rotation (see
+  // the nametag sprite for the same reasoning) - floats just above the
+  // ring rather than trying to lie flat with it
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map:bombSiteLabelTexture(), transparent:true, depthWrite:false }));
+  label.scale.set(1.8, 0.45, 1);
+  label.position.set(x, 0.9, z);
+  mapGroup.add(label);
+}
+let _bombSiteLabelTex = null;
+function bombSiteLabelTexture(){
+  if(_bombSiteLabelTex) return _bombSiteLabelTex;
+  const c = document.createElement('canvas'); c.width=256; c.height=64;
+  const ctx = c.getContext('2d');
+  ctx.font = '700 40px "Rajdhani", sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle = '#f2d8d4';
+  ctx.fillText('BOMB SITE', 128, 32);
+  _bombSiteLabelTex = new THREE.CanvasTexture(c);
+  return _bombSiteLabelTex;
 }
 
 // a lower, covered roof over the tunnels lane (with support ribs) so it
@@ -4395,6 +4463,8 @@ function onNetMessage(msg){
     case 'hitPlayer': netApplyPvpHit(msg.dmg, msg.fromPid); break; // pvp - addressed to ME specifically (direct from host, or relayed)
     case 'killFeed': addKillFeedEntry(msg.killerName, msg.victimName); break; // host -> guest, pvp
     case 'pvpMatchEnd': pvpMatchOver = true; showPvpMatchEnd(msg.label); break; // host -> guest, pvp
+    case 'sndState': sndApplyState(msg); break;             // host -> guest, search & destroy
+    case 'sndNewRound': sndBeginNewRoundLocal(); break;      // host -> guest, search & destroy
 
     case 'ping': netSend({t:'pong', ts: msg.ts}); break;
     case 'pong': net.rtt = Math.round(performance.now() - msg.ts); break;
@@ -4455,6 +4525,8 @@ function onGuestMessage(pid, msg){
       checkPvpWinCondition();
       break;
     }
+    case 'sndPlant': sndHostApplyPlant(); break;   // search & destroy - reported by whichever guest completed it
+    case 'sndDefuse': sndHostApplyDefuse(); break;
   }
 }
 
@@ -4749,6 +4821,168 @@ function showPvpMatchEnd(label){
   showOverlay('MATCH <span>OVER</span>', label+' WINS', 'RETURNING TO MENU', false, false);
   setTimeout(()=> location.reload(), 6000);
 }
+// ---------------------------------------------------------------------------
+// SEARCH & DESTROY - round-based: RED attacks (plant), BLUE defends
+// (defuse), one life per round (death waits out the round - see
+// finishPvpDeath's SND branch), first to SND_ROUNDS_TO_WIN round wins
+// takes the match. Host-authoritative like the rest of PvP: the host owns
+// the round timer/phase and broadcasts it (sndState); a plant/defuse
+// completion is reported to the host (or applied directly if the host
+// itself did it, same self-loop pattern as netBroadcastKillFeed) and only
+// takes effect once the host validates the phase and re-broadcasts.
+// Trusts the client on WHO can plant/defuse (team+phase+range are all
+// checked locally before ever sending the report) rather than re-deriving
+// position server-side - consistent with this game's existing hit-
+// detection trust model, and not worth the extra complexity for a casual
+// hobby project.
+// ---------------------------------------------------------------------------
+const SND_ROUND_TIME = 90;        // seconds before plant - defenders win by default if it expires
+const SND_FUSE_TIME = 40;         // seconds after plant before detonation
+const SND_PLANT_TIME = 3;         // seconds holding F at the site to plant
+const SND_DEFUSE_TIME = 5;        // seconds holding F at the planted site to defuse
+const SND_ROUNDS_TO_WIN = 6;
+const SND_SITE_RADIUS = 3;
+const SND_ROUND_INTERMISSION = 5; // seconds showing the round result before the next round starts
+let snd = { phase:'off', roundTimer:SND_ROUND_TIME, fuseTimer:SND_FUSE_TIME, redWins:0, blueWins:0, roundNum:1 };
+let sndActionKeyDown = false, sndActionProgress = 0, sndBroadcastTimer = 0;
+window.addEventListener('keydown', e=>{ if(e.code==='KeyF') sndActionKeyDown=true; });
+window.addEventListener('keyup', e=>{ if(e.code==='KeyF') sndActionKeyDown=false; });
+
+// RED (attack) always spawns at the map's own spawn, BLUE (defend) at
+// spawn2 - reusing the same two points every other mode already
+// validated, rather than inventing a third spawn set just for this mode
+function sndSpawnPos(){
+  sndAutoAssignTeam();
+  return myTeam==='BLUE' ? (activeMap.spawn2||activeMap.spawn) : activeMap.spawn;
+}
+// picks a team for anyone who reaches SND without explicitly clicking RED/
+// BLUE first (the buttons are right there, but nothing stops a player
+// from skipping straight to a weapon card) - alternates by pid so a full
+// lobby still comes out roughly balanced
+function sndAutoAssignTeam(){
+  if(myTeam) return;
+  const idx = net.myPid==='host' ? 0 : parseInt(net.myPid.slice(1),10);
+  myTeam = (idx%2===0) ? 'RED' : 'BLUE';
+}
+function sndTeamAliveCount(team){
+  let n = (myTeam===team && !playerDead) ? 1 : 0;
+  net.players.forEach(p=>{ if(p.lastXf && p.lastXf.team===team && !p.lastXf.dead) n++; });
+  return n;
+}
+// host-only: starts round 2+ (round 1 rides the normal pvpInit/
+// weaponSelectScreen match-start flow already, since it's indistinguishable
+// from any other mode's start - see the mapGrid click handler)
+function sndStartRound(){
+  snd.phase = 'live';
+  snd.roundTimer = SND_ROUND_TIME;
+  snd.fuseTimer = SND_FUSE_TIME;
+  sndBroadcastState();
+  netSend({t:'sndNewRound'});
+  sndBeginNewRoundLocal();
+}
+// every client's own transition into a fresh round (round 2+) - called
+// directly on the host and via the 'sndNewRound' message on guests
+function sndBeginNewRoundLocal(){
+  document.getElementById('overlay').classList.add('hidden'); // clears a lingering "ELIMINATED - WAITING" overlay from last round
+  updateWeaponSelectScreenText();
+  document.getElementById('weaponSelectScreen').classList.remove('hidden');
+}
+// host-only, called every frame - ticks the round/fuse timer and checks
+// the "all attackers down before plant" loss condition. The actual plant/
+// defuse completions arrive as one-off messages instead (see
+// sndHostApplyPlant/Defuse) rather than being polled here.
+function sndHostTick(dt){
+  if(net.role!=='host' || net.mode!=='pvp' || net.pvpMode!=='SND' || snd.phase==='off' || snd.phase==='roundEnd') return;
+  if(snd.phase==='live'){
+    snd.roundTimer -= dt;
+    if(snd.roundTimer<=0){ sndEndRound('BLUE', 'TIME EXPIRED'); return; }
+    if(sndTeamAliveCount('RED')<=0){ sndEndRound('BLUE', 'ATTACKERS ELIMINATED'); return; }
+  } else if(snd.phase==='planted'){
+    snd.fuseTimer -= dt;
+    if(snd.fuseTimer<=0){ sndEndRound('RED', 'BOMB DETONATED'); return; }
+  }
+  sndBroadcastTimer -= dt;
+  if(sndBroadcastTimer<=0){ sndBroadcastTimer = 0.5; sndBroadcastState(); }
+}
+function sndEndRound(winnerTeam, reason){
+  snd.phase = 'roundEnd';
+  if(winnerTeam==='RED') snd.redWins++; else snd.blueWins++;
+  sndBroadcastState(reason);
+  if(snd.redWins>=SND_ROUNDS_TO_WIN || snd.blueWins>=SND_ROUNDS_TO_WIN){
+    const label = snd.redWins>=SND_ROUNDS_TO_WIN ? 'RED TEAM' : 'BLUE TEAM';
+    setTimeout(()=> declarePvpMatchWinner(label), SND_ROUND_INTERMISSION*1000);
+    return;
+  }
+  setTimeout(()=>{ snd.roundNum++; sndStartRound(); }, SND_ROUND_INTERMISSION*1000);
+}
+function sndBroadcastState(reason){
+  const msg = { t:'sndState', phase:snd.phase, roundTimer:snd.roundTimer, fuseTimer:snd.fuseTimer, redWins:snd.redWins, blueWins:snd.blueWins, roundNum:snd.roundNum, reason };
+  netSend(msg);
+  sndApplyState(msg); // netSend never loops back to the sender - apply locally too
+}
+function sndApplyState(msg){
+  const phaseChanged = snd.phase !== msg.phase;
+  snd.phase = msg.phase; snd.roundTimer = msg.roundTimer; snd.fuseTimer = msg.fuseTimer;
+  snd.redWins = msg.redWins; snd.blueWins = msg.blueWins; snd.roundNum = msg.roundNum;
+  if(phaseChanged && msg.phase==='planted') showSndBanner('BOMB PLANTED', 3000);
+  else if(phaseChanged && msg.phase==='roundEnd') showSndBanner(msg.reason||'ROUND OVER', SND_ROUND_INTERMISSION*1000);
+  updateSndHUD();
+}
+function showSndBanner(text, ms){
+  const el = document.getElementById('sndBanner');
+  el.textContent = text;
+  el.classList.remove('hidden');
+  clearTimeout(showSndBanner._t);
+  showSndBanner._t = setTimeout(()=> el.classList.add('hidden'), ms);
+}
+function sndReportPlant(){ if(net.role==='host') sndHostApplyPlant(); else netSend({t:'sndPlant'}); }
+function sndReportDefuse(){ if(net.role==='host') sndHostApplyDefuse(); else netSend({t:'sndDefuse'}); }
+function sndHostApplyPlant(){
+  if(snd.phase!=='live') return;
+  snd.phase = 'planted';
+  snd.fuseTimer = SND_FUSE_TIME;
+  sndBroadcastState();
+}
+function sndHostApplyDefuse(){
+  if(snd.phase!=='planted') return;
+  sndEndRound('BLUE', 'BOMB DEFUSED');
+}
+// runs on every client every frame - local plant/defuse hold-to-use input
+function updateSndAction(dt){
+  if(net.mode!=='pvp' || net.pvpMode!=='SND' || playerDead || !engaged || snd.phase==='off'){ sndActionProgress=0; updateSndActionHUD(); return; }
+  const site = activeMap.bombSite;
+  if(!site){ sndActionProgress=0; updateSndActionHUD(); return; }
+  const dist = Math.hypot(yawObject.position.x-site.x, yawObject.position.z-site.z);
+  const canPlant = snd.phase==='live' && myTeam==='RED';
+  const canDefuse = snd.phase==='planted' && myTeam==='BLUE';
+  if(dist<=SND_SITE_RADIUS && sndActionKeyDown && (canPlant||canDefuse)){
+    sndActionProgress += dt / (canPlant ? SND_PLANT_TIME : SND_DEFUSE_TIME);
+    if(sndActionProgress>=1){
+      sndActionProgress = 0;
+      if(canPlant) sndReportPlant(); else sndReportDefuse();
+    }
+  } else {
+    sndActionProgress = Math.max(0, sndActionProgress - dt*2); // decays rather than resetting instantly if you let go
+  }
+  updateSndActionHUD();
+}
+function updateSndActionHUD(){
+  const bar = document.getElementById('sndActionBar');
+  if(sndActionProgress<=0){ bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  bar.querySelector('.fill').style.width = (sndActionProgress*100)+'%';
+  bar.querySelector('.label').textContent = myTeam==='RED' ? 'PLANTING' : 'DEFUSING';
+}
+function fmtSndClock(s){ s=Math.max(0,Math.ceil(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+function updateSndHUD(){
+  const el = document.getElementById('sndHud');
+  if(net.mode!=='pvp' || net.pvpMode!=='SND' || snd.phase==='off'){ el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  document.getElementById('sndScore').textContent = 'RED '+snd.redWins+' - '+snd.blueWins+' BLUE';
+  document.getElementById('sndClock').textContent = snd.phase==='planted' ? fmtSndClock(snd.fuseTimer) : fmtSndClock(snd.roundTimer);
+  document.getElementById('sndClock').classList.toggle('fuse', snd.phase==='planted');
+}
+
 // team play only makes sense for the modes that actually score by team
 // (deathmatch and, later, S&D's attack/defend sides) - hidden for FFA/gun
 // game so the loadout screen doesn't imply a choice that does nothing
@@ -4760,6 +4994,9 @@ function updateWeaponSelectScreenText(){
     teamRow.classList.add('hidden');
   } else if(net.pvpMode==='DEATHMATCH'){
     sub.textContent = 'SELECT LOADOUT';
+    teamRow.classList.remove('hidden');
+  } else if(net.pvpMode==='SND'){
+    sub.textContent = 'SELECT LOADOUT - RED PLANTS, BLUE DEFUSES';
     teamRow.classList.remove('hidden');
   } else {
     sub.textContent = 'SELECT LOADOUT';
@@ -4944,7 +5181,7 @@ function pvpSpawnPos(){
   return [sx, sz];
 }
 function pvpRespawnLocal(needsClick){
-  const sp = pvpSpawnPos();
+  const sp = net.pvpMode==='SND' ? sndSpawnPos() : pvpSpawnPos();
   resetAmmoState(); // fresh life - no carried-over ammo cache from the last one
   playerHealth = 100; playerDead = false; net.pvpRespawning = false;
   updateHealthHUD();
@@ -5030,6 +5267,13 @@ function updateKillCam(dt){
 // same loadout screen as match start - letting the click there double as
 // the re-engage gesture means no separate "click to respawn" step
 function finishPvpDeath(killerLabel){
+  if(net.pvpMode==='SND'){
+    // one life per round - no auto-respawn here, sndBeginNewRoundLocal
+    // (fired by the next round's 'sndNewRound' message) clears this and
+    // shows the loadout screen when the round actually ends
+    showOverlay('ELIMINATED', killerLabel, 'WAITING FOR ROUND TO END', false, true);
+    return;
+  }
   showOverlay('ELIMINATED', killerLabel, 'STANDBY', false, true);
   setTimeout(()=>{
     document.getElementById('overlay').classList.add('hidden');
@@ -5369,6 +5613,10 @@ document.querySelectorAll('#mapGrid .mapCard').forEach(btn=>{
       net.players.forEach(p=>{ p.kills=0; p.deaths=0; p.assists=0; });
       netSendStats();
       netSend({t:'pvpInit', mapIndex: currentMapIndex}); // reaches every connected guest
+      if(net.pvpMode==='SND'){
+        snd = { phase:'live', roundTimer:SND_ROUND_TIME, fuseTimer:SND_FUSE_TIME, redWins:0, blueWins:0, roundNum:1 };
+        sndBroadcastState();
+      }
       updateWeaponSelectScreenText();
       document.getElementById('weaponSelectScreen').classList.remove('hidden'); // own loadout pick, then weaponCard's click engages
       return;
@@ -5499,6 +5747,8 @@ function animate(){
   }
 
   updateKillCam(dt);
+  sndHostTick(dt);
+  updateSndAction(dt);
   netTick(dt);
   updateMpHUD();
   checkPerfDowngrade(dt);
