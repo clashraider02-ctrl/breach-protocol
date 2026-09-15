@@ -168,6 +168,17 @@
   #overlay h1.down, #overlay h1.down span{ color:var(--danger); font-size:64px; }
   #overlay p{ color:var(--text-dim); font-family:var(--font-mono); font-size:12px; letter-spacing:3px; margin:4px 0; }
   #overlay .prompt{ margin-top:26px; color:var(--caution); font-family:var(--font-display); font-weight:600; font-size:14px; letter-spacing:4px; animation:pulse 1.6s infinite; }
+
+  /* the very first thing shown, on top of even #connectScreen - browsers
+     block audio until a real user gesture, so the menu music (which
+     should be playing the instant the actual mode-select screen is
+     visible, not just once a mode's been picked) needs SOME click to
+     unlock it first. This is that click: dismissing it starts the music
+     and reveals the connect screen underneath, already playing. */
+  #audioGate{ position:fixed; inset:0; background:#0a0a0c; display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:40; cursor:pointer; text-align:center; }
+  #audioGate h1{ color:var(--text); font-family:var(--font-display); font-weight:700; font-size:42px; letter-spacing:8px; margin:0 0 22px; text-wrap:balance; }
+  #audioGate h1 span{ color:var(--danger); }
+  #audioGate .prompt{ color:var(--caution); font-family:var(--font-display); font-weight:600; font-size:14px; letter-spacing:4px; animation:pulse 1.6s infinite; }
   #overlay .legend{ margin-top:30px; color:var(--text-dim); font-family:var(--font-mono); font-size:11px; line-height:2; letter-spacing:.5px; }
   #overlay .legend b{ color:#b8b4a8; }
 
@@ -300,6 +311,11 @@
 </div>
 
 <audio id="menuMusic" src="menu-music.mp3" loop preload="auto"></audio>
+
+<div id="audioGate">
+  <h1>BREACH <span>PROTOCOL</span></h1>
+  <div class="prompt">CLICK TO CONTINUE</div>
+</div>
 
 <div id="connectScreen">
   <h1>BREACH <span>PROTOCOL</span></h1>
@@ -5735,12 +5751,17 @@ setPlayerGunViewModel(currentWeapon.key); // populate the view-model before the 
 updateHealthHUD();
 updateAmmoHUD();
 
-// menu music starts on the very first user gesture anywhere on the page
-// (browsers block audio before one, regardless of which menu element gets
-// clicked first) and runs until engageGame() actually drops the player
-// into a match
-window.addEventListener('pointerdown', startMenuMusic, { once:true });
-window.addEventListener('keydown', startMenuMusic, { once:true });
+// the audio gate is the FIRST thing the player sees/clicks, specifically
+// so the menu music is already playing by the time the real mode-select
+// screen is visible - previously the music started on whatever the first
+// click anywhere happened to be, which in practice was almost always the
+// SOLO/HOST CO-OP card itself, so it only ever started at the exact
+// moment the player left that screen and was never actually heard on it.
+// Runs until engageGame() actually drops the player into a match.
+document.getElementById('audioGate').addEventListener('click', ()=>{
+  document.getElementById('audioGate').classList.add('hidden');
+  startMenuMusic();
+}, { once:true });
 
 // connect screen is the actual first screen - solo skips straight to map
 // select same as before; the multiplayer roles route through PeerJS before
