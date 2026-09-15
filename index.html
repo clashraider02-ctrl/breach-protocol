@@ -3627,6 +3627,8 @@ const GRENADE_THROW_SPEED = 20;
 const GRENADE_COOLDOWN = 0.6;
 let grenadeCount = GRENADE_MAX;
 let grenadeCooldownTimer = 0;
+let throwAnimTimer = 0;
+const THROW_ANIM_DURATION = 0.4;
 const activeGrenades = [];
 const explosionEffects = [];
 const grenadeGeo = new THREE.SphereGeometry(0.09, 10, 8);
@@ -3649,6 +3651,7 @@ function throwGrenade(){
   if(playerDead || !engaged || grenadeCount<=0 || grenadeCooldownTimer>0) return;
   grenadeCount--;
   grenadeCooldownTimer = GRENADE_COOLDOWN;
+  throwAnimTimer = THROW_ANIM_DURATION;
   updateGrenadeHUD();
   const origin = new THREE.Vector3();
   camera.getWorldPosition(origin);
@@ -6287,8 +6290,14 @@ function animate(){
       // view-model entirely (gunParts.visible, set in setScoped) so its own
       // position doesn't matter while scoped
       const adsIn = scoped && currentWeapon.key!=='SNIPER';
-      gunGroup.position.z += ((adsIn ? -0.42 : -0.55) - gunGroup.position.z)*Math.min(1,dt*12);
-      gunGroup.position.x += ((adsIn ? 0.02 : 0.28) - gunGroup.position.x)*Math.min(1,dt*10);
+      // grenade throw animation - a quick windup-and-release bell curve
+      // across THROW_ANIM_DURATION, computed up front so it can nudge the
+      // same position/rotation targets ADS and reload already drive
+      const throwT = throwAnimTimer>0 ? 1-(throwAnimTimer/THROW_ANIM_DURATION) : 0;
+      const throwKick = throwAnimTimer>0 ? Math.sin(throwT*Math.PI) : 0;
+      if(throwAnimTimer>0) throwAnimTimer = Math.max(0, throwAnimTimer-dt);
+      gunGroup.position.z += ((adsIn ? -0.42 : -0.55) + throwKick*0.15 - gunGroup.position.z)*Math.min(1,dt*14);
+      gunGroup.position.x += ((adsIn ? 0.02 : 0.28) - throwKick*0.08 - gunGroup.position.x)*Math.min(1,dt*10);
       // gun sway based on movement
       const t = now*0.001;
       const moving = keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD'];
@@ -6299,9 +6308,9 @@ function animate(){
       // regardless of which weapon's (different) reload time is playing
       const reloadT = reloading && reloadDuration>0 ? Math.min(1, (reloadDuration-reloadTimer)/reloadDuration) : 0;
       const reloadDip = Math.sin(reloadT*Math.PI);
-      gunGroup.position.y += (-0.28+swayY-reloadDip*0.14 - gunGroup.position.y)*Math.min(1,dt*10);
-      gunGroup.rotation.x += (reloadDip*0.5 - gunGroup.rotation.x)*Math.min(1,dt*10);
-      gunGroup.rotation.z += (-reloadDip*0.22 - gunGroup.rotation.z)*Math.min(1,dt*10);
+      gunGroup.position.y += (-0.28+swayY-reloadDip*0.14+throwKick*0.06 - gunGroup.position.y)*Math.min(1,dt*10);
+      gunGroup.rotation.x += (reloadDip*0.5 - throwKick*0.4 - gunGroup.rotation.x)*Math.min(1,dt*14);
+      gunGroup.rotation.z += (-reloadDip*0.22 - throwKick*0.15 - gunGroup.rotation.z)*Math.min(1,dt*14);
 
       document.getElementById('crosshair').classList.toggle('fire', mouseDown && ammoInMag>0);
       if(pickups.length) updatePickups(dt);
