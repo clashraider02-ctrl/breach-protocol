@@ -3399,7 +3399,7 @@ document.addEventListener('mousemove', e=>{
 // ---------------------------------------------------------------------------
 let currentWeapon = WEAPONS.PISTOL;
 let ammoInMag = currentWeapon.magSize, ammoReserve = currentWeapon.reserveMax;
-let reloading = false, reloadTimer = 0;
+let reloading = false, reloadTimer = 0, reloadDuration = 0;
 let fireCooldown = 0;
 let mouseDown = false;
 let semiReady = false; // armed on the mousedown edge, consumed by one shot - non-auto weapons only fire once per click, not once per FIRE_RATE tick while held
@@ -3444,6 +3444,7 @@ function startReload(){
   if(reloading || ammoInMag>=currentWeapon.magSize || ammoReserve<=0 || playerDead) return;
   reloading = true;
   reloadTimer = currentWeapon.key==='SNIPER' ? 2.1 : currentWeapon.key==='SHOTGUN' ? 2.4 : 1.5;
+  reloadDuration = reloadTimer;
   playReloadSound();
   document.getElementById('reloadLabel').style.visibility = 'visible';
 }
@@ -6138,7 +6139,15 @@ function animate(){
       const t = now*0.001;
       const moving = keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD'];
       const swayY = moving ? Math.sin(t*(sprinting?12:7))*0.012 : Math.sin(t*1.5)*0.004;
-      gunGroup.position.y += (-0.28+swayY - gunGroup.position.y)*Math.min(1,dt*10);
+      // reload animation - a single dip-and-tilt bell curve across the whole
+      // reload duration (0 at the first and last frame, peak at the
+      // midpoint), so it always lines up with the mag-out/mag-in sound cues
+      // regardless of which weapon's (different) reload time is playing
+      const reloadT = reloading && reloadDuration>0 ? Math.min(1, (reloadDuration-reloadTimer)/reloadDuration) : 0;
+      const reloadDip = Math.sin(reloadT*Math.PI);
+      gunGroup.position.y += (-0.28+swayY-reloadDip*0.14 - gunGroup.position.y)*Math.min(1,dt*10);
+      gunGroup.rotation.x += (reloadDip*0.5 - gunGroup.rotation.x)*Math.min(1,dt*10);
+      gunGroup.rotation.z += (-reloadDip*0.22 - gunGroup.rotation.z)*Math.min(1,dt*10);
 
       document.getElementById('crosshair').classList.toggle('fire', mouseDown && ammoInMag>0);
       if(pickups.length) updatePickups(dt);
