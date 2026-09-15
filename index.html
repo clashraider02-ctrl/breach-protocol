@@ -147,6 +147,15 @@
   #sndActionBar .fill{ height:100%; background:var(--caution); width:0%; }
   #sndActionBar .label{ margin-top:4px; font-family:var(--font-display); font-weight:600; font-size:11px; letter-spacing:2px; color:var(--caution); }
 
+  /* zombie mode - points readout top center, a transient banner for
+     mystery box results, and a hold-to-use progress bar matching S&D's */
+  #zombiePoints{ position:absolute; top:8px; left:50%; transform:translateX(-50%); font-family:var(--font-mono); font-size:20px; font-weight:700; color:#8fc46a; letter-spacing:2px; pointer-events:none; }
+  #zombieBoxBanner{ position:absolute; top:40px; left:50%; transform:translateX(-50%); background:rgba(8,8,10,.85); border:1px solid #8fc46a; color:#8fc46a; font-family:var(--font-display); font-weight:700; font-size:14px; letter-spacing:2px; padding:7px 18px; pointer-events:none; }
+  #zombieBoxBar{ position:absolute; left:50%; bottom:130px; transform:translateX(-50%); width:220px; text-align:center; pointer-events:none; }
+  #zombieBoxBar .track{ width:100%; height:6px; background:rgba(0,0,0,.5); border:1px solid #3a3a3a; }
+  #zombieBoxBar .fill{ height:100%; background:#8fc46a; width:0%; }
+  #zombieBoxBar .label{ margin-top:4px; font-family:var(--font-display); font-weight:600; font-size:11px; letter-spacing:2px; color:#8fc46a; }
+
   /* lean tilt handled via camera roll, not css */
 
   #overlay{ position:fixed; inset:0; background:rgba(6,6,8,.94); display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:20; cursor:pointer; text-align:center; }
@@ -274,6 +283,13 @@
     <div class="label">PLANTING</div>
   </div>
 
+  <div id="zombiePoints" class="hidden">0 PTS</div>
+  <div id="zombieBoxBanner" class="hidden"></div>
+  <div id="zombieBoxBar" class="hidden">
+    <div class="track"><div class="fill"></div></div>
+    <div class="label">OPENING BOX</div>
+  </div>
+
   <div id="controlsHelp">
     <div><b>WASD</b> move &nbsp; <b>MOUSE</b> look &nbsp; <b>LMB</b> fire &nbsp; <b>RMB</b> scope (sniper)</div>
     <div><b>R</b> reload &nbsp; <b>SHIFT</b> sprint &nbsp; <b>CTRL</b> crouch (toggle) &nbsp; <b>SPACE</b> jump</div>
@@ -301,6 +317,10 @@
     <button class="modeCard" id="pvpBtn" style="--swatch:#c23b2f">
       <span class="modeCardName">HOST PVP</span>
       <span class="modeCardDesc">Host a free-for-all deathmatch for up to 5, no bots. You pick the map.</span>
+    </button>
+    <button class="modeCard" id="zombiesBtn" style="--swatch:#5a8a3e">
+      <span class="modeCardName">HOST ZOMBIES</span>
+      <span class="modeCardDesc">Squad of up to 5 vs endless waves. Earn points, gamble them on the mystery box.</span>
     </button>
     <button class="modeCard" id="joinBtn" style="--swatch:#d9a53c">
       <span class="modeCardName">JOIN GAME</span>
@@ -2013,6 +2033,7 @@ const MAPS = [
     // spawn2 midpoint for the nearest flat, unobstructed spot reachable
     // from both, same validation as pvpSpawns
     bombSite: {x:5.5, z:-1.5},
+    zombieBox: {x:5.5, z:-1.5}, // reuses the same validated flat/clear/reachable spot as bombSite - never active at the same time (different net.mode/coopVariant)
     ceilHeight: 7.5,
     // slightly bigger than the shared 44x34 footprint (see FACILITY) - the
     // boundary alone moved outward, every interior partition/crate/enemy/
@@ -2089,6 +2110,7 @@ const MAPS = [
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,12],[3,-15],[-21.3,-3.8],[20.7,0.2],[-19.3,14.2]],
     bombSite: {x:-10.6, z:5.5}, // Search & Destroy - see SANDSTONE's note
+    zombieBox: {x:-10.6, z:5.5}, // zombie mode - see SANDSTONE's note
     ceilHeight: 7.5,
     // slightly bigger than the shared 44x34 footprint - see the matching
     // note on SANDSTONE. Same boundary-only change, same diff-verified
@@ -2157,6 +2179,7 @@ const MAPS = [
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,16],[-3,-15],[15.7,-1.3],[-18.3,4.7],[17.7,12.7]],
     bombSite: {x:10.5, z:0.5}, // Search & Destroy - see SANDSTONE's note
+    zombieBox: {x:10.5, z:0.5}, // zombie mode - see SANDSTONE's note
     ceilHeight: 7.5,
     tint: { wall:0x8a7658, wall2:0x746146, floor:0x4a3f2e, crate:0x5c4632, ceil:0x241f18,
       indoorWall:0x6e5a3e, indoorFloor:0x4a3a26 },
@@ -2224,6 +2247,7 @@ const MAPS = [
     // so a spawn on either would place them floating or half-buried.
     pvpSpawns: [[0,30],[6,-26],[-30.3,-38.3],[27.7,5.7],[-30.3,17.7]],
     bombSite: {x:3, z:2}, // Search & Destroy - see SANDSTONE's note
+    zombieBox: {x:3, z:2}, // zombie mode - see SANDSTONE's note
     tint: { wall:0xd6c9a3, wall2:0xa88b5c, floor:0xb5a488, crate:0x8a6a42, ceil:0xa8cfe0 },
     outerWalls: [
       [-22, 34, 24, 0.6], [22, 34, 24, 0.6], [0, 34, 20, 0.6], // solid south wall (T spawn is enclosed, no breach gap needed)
@@ -2361,6 +2385,7 @@ const MAPS = [
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[-26,36],[25,10],[-1,-25],[3,29],[-1,3]],
     bombSite: {x:-0.5, z:23}, // Search & Destroy - see SANDSTONE's note
+    zombieBox: {x:-0.5, z:23}, // zombie mode - see SANDSTONE's note
     tint: { wall:0xac7f5a, wall2:0x8a6144, floor:0x8f7454, crate:0x6b4f34, ceil:0xcbd9e8,
       indoorWall:0x8a6a4a, indoorFloor:0x6b5138 },
     outerWalls: [
@@ -2441,6 +2466,7 @@ const MAPS = [
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,12],[-13,-14],[17.7,-9.3],[-18.3,4.7],[17.7,12.7]],
     bombSite: {x:-1.5, z:-1}, // Search & Destroy - see SANDSTONE's note
+    zombieBox: {x:-1.5, z:-1}, // zombie mode - see SANDSTONE's note
     ceilHeight: 7.5,
     tint: { wall:0x5a5f45, wall2:0x4a4e38, floor:0x36382a, crate:0x6b6a30, ceil:0x1c1e16,
       indoorWall:0x726b3e, indoorFloor:0x494a32 },
@@ -2529,6 +2555,7 @@ const MAPS = [
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,36],[0,-32],[-10,2],[10,-10],[10,14]],
     bombSite: {x:0, z:2}, // Search & Destroy - see SANDSTONE's note
+    zombieBox: {x:0, z:2}, // zombie mode - see SANDSTONE's note
     tint: { wall:0x5c6670, wall2:0x3f4750, floor:0x53575c, crate:0xb5502a, ceil:0x9fc3dd,
       indoorWall:0x6b6f74, indoorFloor:0x484c50 },
     outerWalls: [
@@ -2597,6 +2624,7 @@ const MAPS = [
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,24],[0,-24],[-25,-1],[25,-1],[-25,25]],
     bombSite: {x:0, z:0}, // Search & Destroy - see SANDSTONE's note
+    zombieBox: {x:0, z:0}, // zombie mode - see SANDSTONE's note
     tint: { wall:0x7a7268, wall2:0x655e54, floor:0x59544a, crate:0x8a7a5c, ceil:0xb8c4cc,
       indoorWall:0x6e6558, indoorFloor:0x544e40 },
     outerWalls: [
@@ -2687,6 +2715,7 @@ const MAPS = [
     // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
     pvpSpawns: [[0,42],[0,-42],[-14,-1],[14,13],[12,-15]],
     bombSite: {x:0, z:0}, // Search & Destroy - see SANDSTONE's note
+    zombieBox: {x:0, z:0}, // zombie mode - see SANDSTONE's note
     tint: { wall:0x4a5561, wall2:0x38414c, floor:0x494f54, crate:0x6b7278, ceil:0xaebfc9,
       indoorWall:0x565f68, indoorFloor:0x3d4247 },
     outerWalls: [
@@ -2768,6 +2797,7 @@ function buildMap(map){
   // in that specific pvp mode, so it doesn't clutter every other mode's
   // view of the same map
   if(map.bombSite && net.mode==='pvp' && net.pvpMode==='SND') buildBombSiteMarker(map.bombSite.x, map.bombSite.z);
+  if(map.zombieBox && isZombieMode()) buildZombieBoxMarker(map.zombieBox.x, map.zombieBox.z);
 }
 // a flat glowing ring on the ground - purely decorative (no wallBoxes/
 // raycastMeshes registration), matching every other ground-level marker
@@ -2797,6 +2827,34 @@ function bombSiteLabelTexture(){
   ctx.fillText('BOMB SITE', 128, 32);
   _bombSiteLabelTex = new THREE.CanvasTexture(c);
   return _bombSiteLabelTex;
+}
+// a glowing crate (not just a marker ring, since "box" is the whole point)
+// with a floating label and cost readout above it
+function buildZombieBoxMarker(x, z){
+  const boxMat = new THREE.MeshStandardMaterial({ color:0x8a6a2e, emissive:0x5c4712, emissiveIntensity:0.9, roughness:0.5 });
+  const box = new THREE.Mesh(new THREE.BoxGeometry(1.1,1.1,1.1), boxMat);
+  box.position.set(x, 0.55, z);
+  box.castShadow = true;
+  mapGroup.add(box);
+  const light = new THREE.PointLight(0xd9a53c, 1.5, 6);
+  light.position.set(x, 1.2, z);
+  mapGroup.add(light);
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map:zombieBoxLabelTexture(), transparent:true, depthWrite:false }));
+  label.scale.set(2.0, 0.5, 1);
+  label.position.set(x, 1.6, z);
+  mapGroup.add(label);
+}
+let _zombieBoxLabelTex = null;
+function zombieBoxLabelTexture(){
+  if(_zombieBoxLabelTex) return _zombieBoxLabelTex;
+  const c = document.createElement('canvas'); c.width=256; c.height=64;
+  const ctx = c.getContext('2d');
+  ctx.font = '700 34px "Rajdhani", sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle = '#e8d4a8';
+  ctx.fillText('MYSTERY BOX - '+ZOMBIE_BOX_COST, 128, 32);
+  _zombieBoxLabelTex = new THREE.CanvasTexture(c);
+  return _zombieBoxLabelTex;
 }
 
 // a lower, covered roof over the tunnels lane (with support ribs) so it
@@ -3672,6 +3730,121 @@ function animateEnemyPose(en, dt, isMoving, crouching){
   if(en.muzzleLight.intensity>0) en.muzzleLight.intensity *= Math.max(0, 1-dt*13);
 }
 
+// ---------------------------------------------------------------------------
+// ZOMBIE MODE - a co-op variant (net.coopVariant==='zombies'), not a
+// separate net.mode, specifically so it inherits the entire existing co-op
+// connection/health-sync/squad-wipe/round-clear machinery for free (see
+// spawnRound/damageEnemy/resetRound's isZombieMode branches below) rather
+// than duplicating it. Endless escalating waves (using roundNum as the
+// wave counter - it already drives the HUD/round-clear/retry flow)
+// instead of the 5-map rotation, melee-only enemies built from the same
+// buildEnemy() rig (weaponType 'KNIFE' for the unarmed silhouette, no
+// shooting logic used), and a points economy that gambles on a mystery
+// box for a random weapon.
+// ---------------------------------------------------------------------------
+function isZombieMode(){ return net.mode==='coop' && net.coopVariant==='zombies'; }
+const ZOMBIE_TINT = new THREE.Color(0x4a6b3a);
+const ZOMBIE_MELEE_RANGE = 1.5;
+let zombiePoints = 0;
+const ZOMBIE_BOX_COST = 950;
+const ZOMBIE_BOX_RADIUS = 2;
+let zombieBoxKeyDown = false, zombieBoxProgress = 0;
+const ZOMBIE_BOX_HOLD_TIME = 1.5;
+window.addEventListener('keydown', e=>{ if(e.code==='KeyF') zombieBoxKeyDown=true; });
+window.addEventListener('keyup', e=>{ if(e.code==='KeyF') zombieBoxKeyDown=false; });
+
+// a zombie is a buildEnemy() rig (same limbs/hit meshes/damage handling as
+// every armed bot) with the gun silhouette hidden, tinted decayed green,
+// and driven by updateZombie instead of updateEnemy
+function buildZombie(pos, waveNum){
+  const z = buildEnemy({ pos, patrol:[pos] }, 'KNIFE');
+  z.isZombie = true;
+  z.gunMesh.visible = false;
+  z.bodyMesh.material = z.bodyMesh.material.clone();
+  z.bodyMesh.material.color.copy(ZOMBIE_TINT);
+  z.headMesh.material = z.headMesh.material.clone();
+  z.headMesh.material.color.setHex(0x5a6b4a);
+  // health climbs with the wave - a round-1 zombie dies in a couple of
+  // pistol hits, by wave 10 it can shrug off a whole mag, matching the
+  // usual "zombies get tankier every round" genre convention
+  z.health = z.maxHealth = 100 + (waveNum-1)*40;
+  z.attackTimer = 0.5 + Math.random()*0.5;
+  return z;
+}
+function zombieSpeed(waveNum){
+  // most shamble at a walk; a small (capped) fraction sprint - keeps a big
+  // horde mostly manageable while still forcing real movement decisions
+  return Math.random() < Math.min(0.35, waveNum*0.03) ? 5.2 : 2.0;
+}
+function updateZombie(z, dt){
+  if(z.state==='DEAD') return;
+  if(z.hitFlashTimer>0){
+    z.hitFlashTimer -= dt;
+    z.bodyMesh.material.color.setHex(0xffffff);
+  } else {
+    z.bodyMesh.material.color.copy(ZOMBIE_TINT);
+  }
+  const eyePos = _enemyEyePos.copy(z.group.position); eyePos.y += 1.55;
+  const target = pickEnemyTarget(z, eyePos, dt); // reuses co-op's existing nearest-player targeting
+  const playerPos = target.pos;
+  const dist = dist2D(z.group.position, [playerPos.x, playerPos.z]);
+  if(dist > ZOMBIE_MELEE_RANGE){
+    moveToward(z, [playerPos.x, playerPos.z], zombieSpeed(roundNum), dt);
+  } else {
+    faceToward(z, playerPos, dt);
+    z.attackTimer -= dt;
+    if(z.attackTimer<=0){
+      z.attackTimer = 0.9 + Math.random()*0.4;
+      playAlert(); // reused as a simple attack cue - no dedicated zombie growl asset
+      const dmg = 8 + Math.random()*10;
+      if(target.isLocal) damagePlayer(dmg, z); else netDamagePlayer(target.pid, dmg);
+    }
+  }
+  animateEnemyPose(z, dt, dist>ZOMBIE_MELEE_RANGE, false);
+}
+function updateZombiePointsHUD(){
+  const el = document.getElementById('zombiePoints');
+  el.classList.toggle('hidden', !isZombieMode());
+  el.textContent = zombiePoints+' PTS';
+}
+// host-only: called every frame - the box interaction is purely local
+// feedback (everyone gambles their own points independently), so nothing
+// here needs network sync beyond the resulting weapon equip, which
+// broadcasts itself via the normal xf.weapon field like any other switch
+function updateZombieBox(dt){
+  const el = document.getElementById('zombieBoxBar');
+  if(!isZombieMode() || playerDead || !engaged || !activeMap.zombieBox){ zombieBoxProgress=0; el.classList.add('hidden'); return; }
+  const site = activeMap.zombieBox;
+  const dist = Math.hypot(yawObject.position.x-site.x, yawObject.position.z-site.z);
+  if(dist<=ZOMBIE_BOX_RADIUS && zombieBoxKeyDown && zombiePoints>=ZOMBIE_BOX_COST){
+    zombieBoxProgress += dt/ZOMBIE_BOX_HOLD_TIME;
+    if(zombieBoxProgress>=1){
+      zombieBoxProgress = 0;
+      zombiePoints -= ZOMBIE_BOX_COST;
+      const pool = ['SMG','AR','SHOTGUN','SNIPER','MINIGUN'];
+      const won = pool[Math.floor(Math.random()*pool.length)];
+      equipWeapon(won);
+      updateZombiePointsHUD();
+      showZombieBoxBanner('MYSTERY BOX: '+WEAPONS[won].label);
+    }
+  } else {
+    zombieBoxProgress = Math.max(0, zombieBoxProgress - dt*2);
+  }
+  if(zombieBoxProgress>0){
+    el.classList.remove('hidden');
+    el.querySelector('.fill').style.width = (zombieBoxProgress*100)+'%';
+  } else {
+    el.classList.add('hidden');
+  }
+}
+function showZombieBoxBanner(text){
+  const el = document.getElementById('zombieBoxBanner');
+  el.textContent = text;
+  el.classList.remove('hidden');
+  clearTimeout(showZombieBoxBanner._t);
+  showZombieBoxBanner._t = setTimeout(()=> el.classList.add('hidden'), 3000);
+}
+
 // "the AI gets better every round": a single ramp (capped at round 20, was
 // round 10 - stretched out so a co-op squad has more rounds at an
 // approachable skill level before bots are shooting at full accuracy/
@@ -3699,22 +3872,39 @@ function spawnRound(){
   clearPickups();
   currentDifficulty = difficultyForRound(roundNum);
 
-  // +1 bot every 2 rounds (was capped at +2/round-3, which every map's old
-  // 5-template roster maxed out immediately) - now rides each map's larger
-  // template roster (see enemyTemplates) up to its full size by round 7ish
   const templates = activeMap.enemyTemplates;
-  const count = Math.min(templates.length, 3 + Math.floor((roundNum-1)/2));
-  for(let i=0;i<count;i++){
-    const en = buildEnemy(templates[i], randomEnemyWeapon(roundNum));
-    en.netId = i; // stable id so co-op hit reports/snapshots agree between host and guest
-    enemies.push(en);
+  if(isZombieMode()){
+    // endless escalating horde - starts at 6, +3 every wave, capped well
+    // below anything that would tank framerate. Cycles through the map's
+    // validated enemy-spawn points (safe for any count via modulo, unlike
+    // a normal round which is hard-capped at templates.length) rather than
+    // needing a dedicated zombie-spawn dataset.
+    const count = Math.min(30, 6 + (roundNum-1)*3);
+    for(let i=0;i<count;i++){
+      const t = templates[i % templates.length];
+      const jitter = [t.pos[0]+(Math.random()-0.5)*2, t.pos[1]+(Math.random()-0.5)*2];
+      const z = buildZombie(jitter, roundNum);
+      z.netId = i;
+      enemies.push(z);
+    }
+  } else {
+    // +1 bot every 2 rounds (was capped at +2/round-3, which every map's old
+    // 5-template roster maxed out immediately) - now rides each map's larger
+    // template roster (see enemyTemplates) up to its full size by round 7ish
+    const count = Math.min(templates.length, 3 + Math.floor((roundNum-1)/2));
+    for(let i=0;i<count;i++){
+      const en = buildEnemy(templates[i], randomEnemyWeapon(roundNum));
+      en.netId = i; // stable id so co-op hit reports/snapshots agree between host and guest
+      enemies.push(en);
+    }
   }
   document.getElementById('roundNum').textContent = roundNum;
   updateEnemyCountHUD();
+  updateZombiePointsHUD();
 
   if(net.role==='host' && net.mode==='coop'){
     net.players.forEach(p=>{ p.health = 100; p.dead = false; });
-    netSend({ t:'roundInit', mapIndex: currentMapIndex, roundNum, enemyWeapons: enemies.map(en=>en.weapon) });
+    netSend({ t:'roundInit', mapIndex: currentMapIndex, roundNum, enemyWeapons: enemies.map(en=>en.weapon), zombieMode: isZombieMode(), enemyPos: isZombieMode() ? enemies.map(en=>[en.group.position.x, en.group.position.z]) : undefined });
   }
 }
 
@@ -3763,11 +3953,17 @@ function damageEnemy(enemy, amount, byPid){
     enemy.state='DEAD';
     enemy.group.rotation.z = Math.PI/2.1;
     enemy.group.position.y = 0.05;
-    spawnPickup(enemy.group.position.x, enemy.group.position.z, enemy.weapon);
-    // about 1/3 of kills also drop a stim, offset a bit so it doesn't sit
-    // exactly on top of the weapon drop
-    if(Math.random() < 1/3){
-      spawnPickup(enemy.group.position.x+0.6, enemy.group.position.z+0.4, null, null, false, 'stim');
+    if(enemy.isZombie){
+      // points instead of a weapon drop - a knife pickup off every zombie
+      // would be pointless clutter, and points are the whole point of the mode
+      awardZombiePoints(byPid, 60);
+    } else {
+      spawnPickup(enemy.group.position.x, enemy.group.position.z, enemy.weapon);
+      // about 1/3 of kills also drop a stim, offset a bit so it doesn't sit
+      // exactly on top of the weapon drop
+      if(Math.random() < 1/3){
+        spawnPickup(enemy.group.position.x+0.6, enemy.group.position.z+0.4, null, null, false, 'stim');
+      }
     }
     updateEnemyCountHUD();
     if(net.mode==='coop'){
@@ -3789,10 +3985,20 @@ function damageEnemy(enemy, amount, byPid){
     }
     checkRoundClear();
   } else {
+    if(enemy.isZombie) awardZombiePoints(byPid, 10); // classic zombies-genre "10 points a hit" - matches the kill bonus feeling meaningfully bigger
     // getting shot alerts the enemy immediately, and calls in anyone nearby
     enemy.lastKnownPlayerPos = yawObject.position.clone();
     if(enemy.state==='PATROL'){ enemy.state='ALERT'; enemy.reactionTimer=0.18; playAlert(); alertNearby(enemy); }
   }
+}
+// host-only (damageEnemy only ever runs host-side/solo): credits points to
+// whoever actually landed the hit - the local player if byPid is unset
+// (the host's own shot), or a specific connected guest via a direct
+// message, since zombiePoints is a purely local/per-client wallet, not
+// synced host state like kills/deaths
+function awardZombiePoints(byPid, amount){
+  if(byPid){ sendToGuest(byPid, {t:'zombiePoints', amount}); }
+  else { zombiePoints += amount; updateZombiePointsHUD(); }
 }
 
 // squad awareness: whoever spots (or gets shot by) the player calls it in -
@@ -3863,7 +4069,8 @@ function checkSquadWipe(){
 function declareSquadWipe(){
   squadWiped = true;
   document.getElementById('spectateBanner').classList.add('hidden');
-  showOverlay('SQUAD <span>DOWN</span>', 'THE WHOLE SQUAD WAS ELIMINATED', 'CLICK TO RETRY ROUND', false, true);
+  const sub = isZombieMode() ? 'OVERRUN ON WAVE '+roundNum : 'THE WHOLE SQUAD WAS ELIMINATED';
+  showOverlay('SQUAD <span>DOWN</span>', sub, 'CLICK TO RETRY', false, true);
   netSend({t:'squadDown'});
 }
 
@@ -3901,7 +4108,9 @@ function checkRoundClear(){
     roundCleared = true;
     document.getElementById('spectateBanner').classList.add('hidden');
     if(net.role==='host' && net.mode==='coop') netSend({t:'squadCleared'});
-    showOverlay('AREA <span>CLEARED</span>', 'ALL HOSTILES NEUTRALIZED', 'CLICK TO CONTINUE', false);
+    const title = isZombieMode() ? 'WAVE <span>CLEARED</span>' : 'AREA <span>CLEARED</span>';
+    const sub = isZombieMode() ? 'ALL HOSTILES NEUTRALIZED - WAVE '+roundNum : 'ALL HOSTILES NEUTRALIZED';
+    showOverlay(title, sub, 'CLICK TO CONTINUE', false);
   }
 }
 
@@ -4148,6 +4357,7 @@ const MAX_GUESTS = 4; // up to 5 players total (host + this many guests), either
 const net = {
   mode: 'solo',            // 'solo' | 'coop' | 'pvp'
   pvpMode: 'FFA',           // 'FFA' | 'DEATHMATCH' | 'GUNGAME' | 'SND' - only meaningful when mode==='pvp'
+  coopVariant: 'standard', // 'standard' | 'zombies' - only meaningful when mode==='coop'
   role: null,               // 'host' | 'guest' | null
   myPid: null,               // this client's own id: 'host', or 'p1'..'p4' for a guest
   peer: null, conn: null, connected: false,
@@ -4372,7 +4582,7 @@ function wireGuestConnection(pid, conn){
   conn.on('open', ()=>{
     net.connected = true;
     clearTimeout(net.connectTimeoutId);
-    conn.send({t:'welcome', pid, mode:net.mode, pvpMode:net.pvpMode});
+    conn.send({t:'welcome', pid, mode:net.mode, pvpMode:net.pvpMode, coopVariant:net.coopVariant});
     renderLobbyRoster();
   });
   conn.on('data', msg=> onGuestMessage(pid, msg));
@@ -4444,8 +4654,8 @@ function wireConnection(onOpen){
 function onNetMessage(msg){
   if(!msg || !msg.t) return;
   switch(msg.t){
-    case 'mode': netOnModeChosen(msg.mode, msg.pvpMode); break;
-    case 'welcome': net.myPid = msg.pid; if(msg.pvpMode) net.pvpMode = msg.pvpMode; break; // host -> guest, co-op: this client's assigned id
+    case 'mode': netOnModeChosen(msg.mode, msg.pvpMode, msg.coopVariant); break;
+    case 'welcome': net.myPid = msg.pid; if(msg.pvpMode) net.pvpMode = msg.pvpMode; if(msg.coopVariant) net.coopVariant = msg.coopVariant; break; // host -> guest, co-op: this client's assigned id
     case 'full': setNetStatus('That game is already full or in progress.', true); break; // host -> guest, co-op
     case 'roundInit': netApplyRoundInit(msg); break;            // host -> guest, co-op
     case 'pvpInit': netApplyPvpInit(msg); break;                // host -> guest, pvp
@@ -4457,6 +4667,7 @@ function onNetMessage(msg){
       if(net.role==='guest') spawnPickup(msg.x, msg.z, msg.weaponType, msg.id, true, msg.kind);
       break;
     case 'pickupTaken': removePickupById(msg.id); break;        // co-op, relayed - whoever didn't grab it locally removes their copy
+    case 'zombiePoints': zombiePoints += msg.amount; updateZombiePointsHUD(); break; // host -> guest, zombie mode
     case 'playerLeft': netApplyPlayerLeft(msg.pid); break;      // host -> guest, both modes
     case 'squadDown': netApplySquadDown(); break;               // host -> guest, co-op
     case 'squadCleared': netApplySquadCleared(); break;         // host -> guest, co-op
@@ -4530,9 +4741,10 @@ function onGuestMessage(pid, msg){
   }
 }
 
-function netOnModeChosen(mode, pvpMode){
+function netOnModeChosen(mode, pvpMode, coopVariant){
   net.mode = mode;
   if(pvpMode) net.pvpMode = pvpMode;
+  if(coopVariant) net.coopVariant = coopVariant;
   document.getElementById('connectScreen').classList.add('hidden');
   showOverlay('BREACH <span>PROTOCOL</span>', (mode==='pvp'?'PVP':'CO-OP')+' - WAITING FOR HOST', 'STANDBY', false);
 }
@@ -4744,13 +4956,16 @@ function netApplySquadDown(){
   squadWiped = true;
   playerDead = true; // covers the (rare) case this arrives before our own 'yourHealth' <= 0 does
   document.getElementById('spectateBanner').classList.add('hidden');
-  showOverlay('SQUAD <span>DOWN</span>', 'THE WHOLE SQUAD WAS ELIMINATED', 'STANDBY', false, true);
+  const wipeSub = isZombieMode() ? 'OVERRUN ON WAVE '+roundNum : 'THE WHOLE SQUAD WAS ELIMINATED';
+  showOverlay('SQUAD <span>DOWN</span>', wipeSub, 'STANDBY', false, true);
 }
 function netApplySquadCleared(){
   if(roundCleared) return;
   roundCleared = true;
   document.getElementById('spectateBanner').classList.add('hidden');
-  showOverlay('AREA <span>CLEARED</span>', 'ALL HOSTILES NEUTRALIZED', 'STANDBY', false);
+  const clearTitle = isZombieMode() ? 'WAVE <span>CLEARED</span>' : 'AREA <span>CLEARED</span>';
+  const clearSub = isZombieMode() ? 'ALL HOSTILES NEUTRALIZED - WAVE '+roundNum : 'ALL HOSTILES NEUTRALIZED';
+  showOverlay(clearTitle, clearSub, 'STANDBY', false);
 }
 function netApplyStats(msg){
   net.hostKills=msg.hostKills; net.hostDeaths=msg.hostDeaths; net.hostAssists=msg.hostAssists;
@@ -5039,8 +5254,17 @@ function netApplyRoundInit(msg){
   enemies.length = 0;
   clearPickups(); // the host clears its own on every spawnRound() - do the same here so a leftover pickup from last round doesn't linger on the guest's screen
   msg.enemyWeapons.forEach((weaponType, i)=>{
-    const t = activeMap.enemyTemplates[i];
-    const puppet = buildEnemy(t, weaponType);
+    let puppet;
+    if(msg.zombieMode){
+      // zombie counts can exceed the map's own template roster (endless
+      // escalating waves), and each one's exact position is randomly
+      // jittered host-side - so this rebuilds from the host's own
+      // broadcast position instead of independently re-deriving one
+      puppet = buildZombie(msg.enemyPos[i], msg.roundNum);
+    } else {
+      const t = activeMap.enemyTemplates[i];
+      puppet = buildEnemy(t, weaponType);
+    }
     puppet.netId = i;
     puppet.state = 'PATROL';
     puppet._lastFireFlag = 0;
@@ -5048,6 +5272,7 @@ function netApplyRoundInit(msg){
     net.puppets.set(i, puppet);
   });
   updateEnemyCountHUD();
+  updateZombiePointsHUD();
   playerDead = false; playerHealth = 100; roundCleared = false; squadWiped = false;
   document.getElementById('spectateBanner').classList.add('hidden');
   updateHealthHUD();
@@ -5106,6 +5331,7 @@ function updateNetPuppet(en, dt){
     en.muzzleFlash.material.opacity = 1; en.muzzleLight.intensity = 3.4; en.recoilTimer = 0.16;
   }
   if(en.hitFlashTimer>0){ en.hitFlashTimer -= dt; en.bodyMesh.material.color.setHex(0xffffff); }
+  else if(en.isZombie) en.bodyMesh.material.color.copy(ZOMBIE_TINT);
   else en.bodyMesh.material.color.copy(en.state==='COMBAT' ? new THREE.Color(0xd23c3c) : new THREE.Color(0x8a2e2e));
   animateEnemyPose(en, dt, moving || en.state==='COMBAT');
 }
@@ -5506,7 +5732,11 @@ function resetRound(nextRound){
   // either way, rather than restoring a partial mag from mid-round slot
   // switching right before the death that triggered this retry.
   resetAmmoState();
-  equipWeapon(nextRound ? weaponForRound(roundNum) : currentWeapon.key);
+  // zombie mode never forces a round weapon - earning a better one is the
+  // whole point of the mystery box, and a forced swap would just erase it
+  // every wave. Starts at the default PISTOL on wave 1, same as any other
+  // mode, since currentWeapon hasn't changed yet at that point.
+  equipWeapon(isZombieMode() ? currentWeapon.key : (nextRound ? weaponForRound(roundNum) : currentWeapon.key));
   updateHealthHUD();
   spawnRound(); // may switch maps first, so activeMap.spawn below is current
   yawObject.position.set(activeMap.spawn[0], EYE_STAND, activeMap.spawn[1]);
@@ -5546,7 +5776,8 @@ document.getElementById('soloBtn').addEventListener('click', ()=>{
   document.getElementById('connectScreen').classList.add('hidden');
   document.getElementById('mapSelectScreen').classList.remove('hidden');
 });
-document.getElementById('coopBtn').addEventListener('click', ()=> hostGame('coop'));
+document.getElementById('coopBtn').addEventListener('click', ()=>{ net.coopVariant='standard'; hostGame('coop'); });
+document.getElementById('zombiesBtn').addEventListener('click', ()=>{ net.coopVariant='zombies'; hostGame('coop'); });
 document.getElementById('pvpBtn').addEventListener('click', ()=>{
   document.getElementById('modeGrid').classList.add('hidden');
   document.getElementById('pvpModeScreen').classList.remove('hidden');
@@ -5592,7 +5823,7 @@ document.getElementById('startCoopBtn').addEventListener('click', ()=>{
   document.getElementById('connectScreen').classList.add('hidden');
   document.getElementById('mapSelectScreen').classList.remove('hidden');
   document.getElementById('mapSelectSub').textContent = net.mode==='pvp' ? 'SELECT ARENA - PVP' : 'SELECT INSERTION POINT - CO-OP';
-  netSend({t:'mode', mode:net.mode, pvpMode:net.pvpMode}); // tell every connected guest we're underway
+  netSend({t:'mode', mode:net.mode, pvpMode:net.pvpMode, coopVariant:net.coopVariant}); // tell every connected guest we're underway
 });
 
 // map select: picking a card both chooses the starting map and serves as
@@ -5630,6 +5861,7 @@ document.querySelectorAll('#mapGrid .mapCard').forEach(btn=>{
       net.players.forEach(p=>{ p.kills=0; p.deaths=0; p.assists=0; });
       netSendStats();
     }
+    zombiePoints = 0; // wallet is per-client and per-session - fresh every new match, same reasoning as the scoreboard above
     resetRound(true); // spawnRound() (inside resetRound) broadcasts roundInit when hosting co-op
   });
 });
@@ -5743,12 +5975,13 @@ function animate(){
     // Runs regardless of whether the HOST itself is currently down, same
     // reasoning as roundLive above.
     const runsLocalAI = !(net.role==='guest' && net.mode==='coop');
-    if(runsLocalAI) enemies.forEach(en=>updateEnemy(en, dt));
+    if(runsLocalAI) enemies.forEach(en=> en.isZombie ? updateZombie(en, dt) : updateEnemy(en, dt));
   }
 
   updateKillCam(dt);
   sndHostTick(dt);
   updateSndAction(dt);
+  updateZombieBox(dt);
   netTick(dt);
   updateMpHUD();
   checkPerfDowngrade(dt);
