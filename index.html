@@ -4432,17 +4432,23 @@ function spawnRound(nextRound){
     // once - the first batch spawns immediately here, the rest queue up
     // for updateZombieSpawnQueue to release over time.
     const count = Math.min(30, 6 + (roundNum-1)*3);
+    // a high-round horde spreads across more of the map than just the
+    // enemyTemplates roster - the map's own already-validated pvpSpawns
+    // points (flat, reachable, confirmed clear - same guarantee
+    // enemyTemplates itself has) fold into the same cycling pool, so a
+    // 30-zombie wave uses up to 11 distinct points instead of 6, rather
+    // than clustering at the usual patrol spots every single wave
+    const spawnPool = templates.map(t=>t.pos).concat(activeMap.pvpSpawns || []);
     // maps with a real, unwalled breach gap (see zombieOutsideSpawn) send
     // roughly a third of the wave through it instead of every zombie
-    // starting already inside the arena - the rest still use the map's
-    // normal validated enemyTemplates points, same as before this existed
+    // starting already inside the arena - the rest use the pool above
     const positions = [];
     for(let i=0;i<count;i++){
       if(activeMap.zombieOutsideSpawn && i%3===0){
         positions.push({ pos: zombieOutsidePos(), outside:true });
       } else {
-        const t = templates[i % templates.length];
-        positions.push({ pos: [t.pos[0]+(Math.random()-0.5)*2, t.pos[1]+(Math.random()-0.5)*2], outside:false });
+        const p = spawnPool[i % spawnPool.length];
+        positions.push({ pos: [p[0]+(Math.random()-0.5)*2, p[1]+(Math.random()-0.5)*2], outside:false });
       }
     }
     const firstBatch = Math.min(ZOMBIE_SPAWN_BATCH, count);
