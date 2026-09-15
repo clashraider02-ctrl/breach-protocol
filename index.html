@@ -1937,6 +1937,10 @@ const MAPS = [
     name: 'SANDSTONE',
     spawn: [0, 12],
     spawn2: [-3, -15], // second player/PvP spawn - the north pocket, clear of every crate/patrol/wall
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - [0]/[1] are spawn/
+    // spawn2 above, [2..4] found by maximizing distance from every other
+    // spawn and confirmed reachable by walk-simulation
+    pvpSpawns: [[0,12],[-3,-15],[20.7,-3.8],[-21.3,0.2],[18.7,14.2]],
     ceilHeight: 7.5,
     // slightly bigger than the shared 44x34 footprint (see FACILITY) - the
     // boundary alone moved outward, every interior partition/crate/enemy/
@@ -2010,6 +2014,8 @@ const MAPS = [
     name: 'FACILITY',
     spawn: [0, 12],
     spawn2: [3, -15],
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
+    pvpSpawns: [[0,12],[3,-15],[-21.3,-3.8],[20.7,0.2],[-19.3,14.2]],
     ceilHeight: 7.5,
     // slightly bigger than the shared 44x34 footprint - see the matching
     // note on SANDSTONE. Same boundary-only change, same diff-verified
@@ -2075,6 +2081,8 @@ const MAPS = [
     name: 'VILLA',
     spawn: [0, 16],
     spawn2: [-3, -15],
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
+    pvpSpawns: [[0,16],[-3,-15],[15.7,-1.3],[-18.3,4.7],[17.7,12.7]],
     ceilHeight: 7.5,
     tint: { wall:0x8a7658, wall2:0x746146, floor:0x4a3f2e, crate:0x5c4632, ceil:0x241f18,
       indoorWall:0x6e5a3e, indoorFloor:0x4a3a26 },
@@ -2135,6 +2143,12 @@ const MAPS = [
     clamp: { x:33.3, z:41.3 },
     spawn: [0, 30],
     spawn2: [6, -26],
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note.
+    // Candidates are also checked for flat ground level here specifically
+    // (groundHeightAt===0) since DUST has a sunken tunnel and a raised
+    // plateau - pvpSpawnPos always drops the player at a fixed eye height,
+    // so a spawn on either would place them floating or half-buried.
+    pvpSpawns: [[0,30],[6,-26],[-30.3,-38.3],[27.7,5.7],[-30.3,17.7]],
     tint: { wall:0xd6c9a3, wall2:0xa88b5c, floor:0xb5a488, crate:0x8a6a42, ceil:0xa8cfe0 },
     outerWalls: [
       [-22, 34, 24, 0.6], [22, 34, 24, 0.6], [0, 34, 20, 0.6], // solid south wall (T spawn is enclosed, no breach gap needed)
@@ -2269,6 +2283,8 @@ const MAPS = [
     clamp: { x:34, z:40 },
     spawn: [-26, 36],
     spawn2: [25, 10],
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
+    pvpSpawns: [[-26,36],[25,10],[-1,-25],[3,29],[-1,3]],
     tint: { wall:0xac7f5a, wall2:0x8a6144, floor:0x8f7454, crate:0x6b4f34, ceil:0xcbd9e8,
       indoorWall:0x8a6a4a, indoorFloor:0x6b5138 },
     outerWalls: [
@@ -2346,6 +2362,8 @@ const MAPS = [
     name: 'NUKE',
     spawn: [0, 12],
     spawn2: [-13, -14],
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
+    pvpSpawns: [[0,12],[-13,-14],[17.7,-9.3],[-18.3,4.7],[17.7,12.7]],
     ceilHeight: 7.5,
     tint: { wall:0x5a5f45, wall2:0x4a4e38, floor:0x36382a, crate:0x6b6a30, ceil:0x1c1e16,
       indoorWall:0x726b3e, indoorFloor:0x494a32 },
@@ -2431,6 +2449,8 @@ const MAPS = [
     clamp: { x:13, z:43 },
     spawn: [0, 36],
     spawn2: [0, -32],
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
+    pvpSpawns: [[0,36],[0,-32],[-10,2],[10,-10],[10,14]],
     tint: { wall:0x5c6670, wall2:0x3f4750, floor:0x53575c, crate:0xb5502a, ceil:0x9fc3dd,
       indoorWall:0x6b6f74, indoorFloor:0x484c50 },
     outerWalls: [
@@ -2496,6 +2516,8 @@ const MAPS = [
     clamp: { x:28, z:28 },
     spawn: [0, 24],
     spawn2: [0, -24],
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
+    pvpSpawns: [[0,24],[0,-24],[-25,-1],[25,-1],[-25,25]],
     tint: { wall:0x7a7268, wall2:0x655e54, floor:0x59544a, crate:0x8a7a5c, ceil:0xb8c4cc,
       indoorWall:0x6e6558, indoorFloor:0x544e40 },
     outerWalls: [
@@ -2583,6 +2605,8 @@ const MAPS = [
     clamp: { x:17, z:48 },
     spawn: [0, 42],
     spawn2: [0, -42],
+    // up to 5 distinct PvP spawns (see pvpSpawnPos) - see SANDSTONE's note
+    pvpSpawns: [[0,42],[0,-42],[-14,-1],[14,13],[12,-15]],
     tint: { wall:0x4a5561, wall2:0x38414c, floor:0x494f54, crate:0x6b7278, ceil:0xaebfc9,
       indoorWall:0x565f68, indoorFloor:0x3d4247 },
     outerWalls: [
@@ -4696,13 +4720,19 @@ function netApplyPvpInit(msg){
 // apart as they've always been for a duel), with a small per-player
 // offset ring around each - same trick coopGuestSpawnPos uses, so more
 // than 2 players don't respawn stacked on top of each other
+// one real spot per player (up to 5) instead of jittering around just the
+// 2 old spawn/spawn2 points, which put 2-3 players almost on top of each
+// other in a 5-player FFA. Every map's pvpSpawns[0]/[1] are its existing
+// spawn/spawn2 (unchanged, so a 1-2 player match looks exactly as before);
+// [2..4] are 3 new points, each found by maximizing distance from every
+// other spawn and confirmed reachable by walk-simulation, same as this
+// file's other spawn-point validation.
 function pvpSpawnPos(){
   const idx = net.myPid==='host' ? 0 : parseInt(net.myPid.slice(1), 10);
-  const [sx, sz] = (idx % 2 === 0) ? activeMap.spawn : (activeMap.spawn2 || activeMap.spawn);
+  const spots = activeMap.pvpSpawns || [activeMap.spawn, activeMap.spawn2 || activeMap.spawn];
+  const [sx, sz] = spots[idx % spots.length];
   const offsets = [[0,0],[1.3,0],[-1.3,0],[0,1.3],[0,-1.3],[1.3,1.3],[-1.3,-1.3],[1.3,-1.3],[-1.3,1.3]];
-  const myIdx = Math.floor(idx/2) % offsets.length;
-  const rotated = offsets.slice(myIdx).concat(offsets.slice(0, myIdx));
-  for(const [ox,oz] of rotated){
+  for(const [ox,oz] of offsets){
     if(boxIsFree(sx+ox, sz+oz, 0)) return [sx+ox, sz+oz];
   }
   return [sx, sz];
